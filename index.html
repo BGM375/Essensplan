@@ -640,16 +640,18 @@ function tripParts(w,name){
   const fr=sundayStore(); const sx=(D.seg&&D.seg[w]&&D.seg[w][name])||{A:0,B:0,C:0};
   const st=S.assign[name]||''; const other= !!st && st!==fr;
   const r= g=>g2(g);
-  if(other) return [{trip:'r1',key:'so:'+name,g:r(sx.A),warn:true},{trip:'r2',key:'r2:'+name,g:r(sx.B+sx.C)}].filter(p=>p.g>0.05);
-  return [{trip:'r1',key:'so:'+name,g:r(sx.A+sx.B)},{trip:'r3',key:'r3:'+name,g:r(sx.C)}].filter(p=>p.g>0.05);
+  if(other) return [{trip:'r1',key:'so:'+name,g:r(sx.A),warn:true,seg:'A'},{trip:'r2',key:'r2:'+name,g:r(sx.B+sx.C)}].filter(p=>p.g>0.05);
+  const bTue=S.bOnTue===true;
+  return [{trip:'r1',key:'so:'+name,g:r(sx.A),seg:'A'},(bTue?{trip:'r2',key:'r2b:'+name,g:r(sx.B),seg:'B'}:{trip:'r1',key:'sb:'+name,g:r(sx.B),seg:'B'}),{trip:'r3',key:'r3:'+name,g:r(sx.C)}].filter(p=>p.g>0.05);
 }
 const TRIPLBL={r1:'Sa/So',r2:'Di',r3:'Do'};
+function partLbl(q){ return q.trip==='r1'?(q.seg==='B'?'Sa/So für Di–Do':'Sa/So bis Di'):TRIPLBL[q.trip]; }
 function tripItems(w){
   const out=[];
   D.shop[w].items.forEach(([cat,name,g])=>{
     const parts=tripParts(w,name);
-    parts.forEach(p=>{ const others=parts.filter(q=>q!==p).map(q=>`${TRIPLBL[q.trip]}: ${fmtG(q.g)} g`).join(' · ');
-      out.push({key:p.key,name,cat,g:p.g,trip:p.trip,warn:p.warn,extra:false,amt:amtStr(name,p.g)+(others?` · ${others}`:'')}); });
+    parts.forEach(p=>{ const others=parts.filter(q=>q!==p).map(q=>`${partLbl(q)}: ${fmtG(q.g)} g`).join(' · ');
+      out.push({key:p.key,name,cat,g:p.g,trip:p.trip,seg:p.seg,warn:p.warn,extra:false,amt:amtStr(name,p.g)+(others?` · ${others}`:'')}); });
   });
   (S.extra[w]||[]).forEach(e=>out.push({key:'x:'+e.id,name:e.name,cat:'Eigene Artikel',amt:e.amt||'',extra:true,id:e.id,trip:(S.assign['x:'+e.id]&&S.assign['x:'+e.id]!==sundayStore())?'r2':'r3'}));
   return out;
@@ -711,7 +713,8 @@ function viewEinkauf(){
     const fr=sundayStore();
     h+=sundayCard(w, items.filter(it=>it.trip==='r1'));
     h+=`<div class="muted" style="font-size:.85rem;margin-top:10px">So teilt die App ein: <b>Sa/So</b> bei ${esc(fr)} alles bis Di 14 Uhr, dazu ${esc(fr)}-Sachen bis Do 17 Uhr. <b>Di</b> alles, was du in anderen Läden kaufst. <b>Do</b> bei ${esc(fr)} alles ab Do-Abend bis Sonntag. Zutaten ohne Laden zählen wie ${esc(fr)}.</div>`;
-    groups=[{title:`Sa/So · ${fr} · bis Di 14 Uhr`, items:items.filter(it=>it.trip==='r1')},{title:'Di · Aldi, Edeka & Co. · Rest der Woche', items:items.filter(it=>it.trip==='r2'), byStore:true},{title:`Do · ${fr} · Do-Abend bis So`, items:items.filter(it=>it.trip==='r3')}];
+    h+=`<div class="row" style="margin-top:8px;gap:8px;align-items:center"><span style="font-size:.9rem">${esc(fr)}-Sachen für Di-Abend bis Do:</span><div class="seg" style="flex:1 1 200px"><button data-btue="0" aria-pressed="${S.bOnTue!==true}">am Wochenende</button><button data-btue="1" aria-pressed="${S.bOnTue===true}">am Dienstag</button></div></div>`;
+    groups=[{title:`Sa/So · ${fr}`, items:items.filter(it=>it.trip==='r1'), bySeg:true},{title:'Di · Aldi, Edeka & Co. · Rest der Woche', items:items.filter(it=>it.trip==='r2'), byStore:true},{title:`Do · ${fr} · Do-Abend bis So`, items:items.filter(it=>it.trip==='r3')}];
   } else if(shopSort==='laden'){
     groups=S.stores.concat(['']).map(st=>({title:st||'Noch kein Laden', items: st ? items.filter(it=>storeOf(it)===st) : items.filter(it=>!S.stores.includes(storeOf(it)))}));
   } else if(shopSort==='tag'){
@@ -730,7 +733,10 @@ function viewEinkauf(){
     if(hideDone) list=list.filter(it=>!isClosed(w,it));
     h+=`<section class="group"><h3><span>${esc(g.title)}</span><span class="muted num" style="font-family:var(--f-body);font-size:.85rem">${open} offen</span></h3>`;
     if(!list.length){ h+=`<div class="list"><div class="empty">Alles erledigt.</div></div></section>`; return; }
-    if(g.byStore){
+    if(g.bySeg){
+      const segs=[['A','Bis Di 14 Uhr'],['B','Für Di-Abend bis Do (nächster '+esc(sundayStore())+'-Einkauf erst Do)']];
+      h+=segs.map(([sg,lbl])=>{ const l=list.filter(i=>(i.seg||'A')===sg); return l.length?`<div class="subhead">${lbl}</div><div class="list">${l.map(it=>itemRow(w,it)).join('')}</div>`:''; }).join('');
+    } else if(g.byStore){
       const sts=[...new Set(list.map(i=>storeOf(i)||'Noch kein Laden'))].sort((a,b)=>(S.stores.indexOf(a)+99*(a==='Noch kein Laden'))-(S.stores.indexOf(b)+99*(b==='Noch kein Laden')));
       h+=sts.map(st=>`<div class="subhead">${esc(st)}</div><div class="list">${list.filter(i=>(storeOf(i)||'Noch kein Laden')===st).map(it=>itemRow(w,it)).join('')}</div>`).join('');
     } else if(shopSort==='laden'||shopSort==='tag'||shopSort==='trip'){
@@ -749,6 +755,7 @@ function viewEinkauf(){
   document.querySelectorAll('[data-sw]').forEach(b=>b.onclick=()=>{shopWeek=+b.dataset.sw;confirmReset=false;autoMsg='';render();});
   document.querySelectorAll('[data-sort]').forEach(b=>b.onclick=()=>{shopSort=b.dataset.sort;try{localStorage.setItem(LS+'-sort',shopSort)}catch(e){};render();});
   $('#hideDone').onclick=()=>{hideDone=!hideDone;render();};
+  document.querySelectorAll('[data-btue]').forEach(b=>b.onclick=()=>{ S.bOnTue=b.dataset.btue==='1'; persist(); keepScroll(render); });
   const ss=$('#sunStore'); if(ss) ss.onchange=()=>{ S.sundayStore=ss.value; persist(); keepScroll(render); };
   const aa=$('#autoArr'); if(aa) aa.onclick=()=>{ const r=autoArrange(w); persist(); autoMsg=r.swaps?`${r.swaps} Tausch${r.swaps>1?'e':''} in Woche ${w}: vorher ${r.before}, jetzt ${r.after} Artikel woanders.`:`Keine bessere Anordnung gefunden (${r.after} Artikel woanders). Ordne diese Zutaten ggf. ${sundayStore()} zu.`; keepScroll(render); };
   const aal=$('#autoArrAll'); if(aal) aal.onclick=()=>{ const parts=[1,2,3,4].map(x=>{ const r=autoArrange(x); return `W${x}: ${r.before}→${r.after}`; }); persist(); autoMsg='Artikel woanders vorher→nachher: '+parts.join(' · '); keepScroll(render); };
