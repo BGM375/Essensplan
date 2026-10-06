@@ -417,7 +417,7 @@ function buildEP(){
 function g2(g){ return g>=10?Math.round(g):Math.round(g*10)/10; }
 function computeNeeds(){
   const AB=['Mo','Di','Mi','Do','Fr','Sa','So'], ORDER=['So davor'].concat(AB);
-  const need={1:{},2:{},3:{},4:{}}; const win={1:{},2:{},3:{},4:{}};
+  const need={1:{},2:{},3:{},4:{}}; const win={1:{},2:{},3:{},4:{}}; const seg={1:{},2:{},3:{},4:{}};
   EP.forEach(m=>{
     const meal=m[2], hint=m[5]||''; if(meal==='Mittagessen' && /aufwärmen/.test(hint)) return;
     const d=D.dishes[m[4]]; if(!d) return; const di=DAYS.indexOf(m[1]);
@@ -429,9 +429,15 @@ function computeNeeds(){
     { const dt=rowDate(m); if(rowSkipped(m,dt)) return; if(meal==='Abendessen') por=effPor(m,dt); }
     // Sunday trip covers everything up to Tuesday's 14:00 meal: So davor, Monday, and Tuesday's morning meals
     const inWin = lab==='So davor' || lab==='Mo' || (lab==='Di' && di===1 && (meal==='Frühstück'||meal==='Frühsnack'));
-    d.ing.forEach(([n,g])=>{ const x=need[m[0]][n]=need[m[0]][n]||{}; x[lab]=(x[lab]||0)+g*por; if(inWin) win[m[0]][n]=(win[m[0]][n]||0)+g*por; });
+    // time the ingredients are needed (hours from Monday 0:00): A = until Tue 14:00, B = until Thu 17:00, C = rest of the week
+    const HR={'Frühstück':8,'Frühsnack':11,'Mittagessen':14,'Abendessen':17,'Abendsnack':21};
+    let t; if(/Start-Gericht/.test(hint)) t=-7; else if(['Frühstück','Frühsnack','Abendsnack'].includes(meal) && (d.va||0)>0) t=(di-1)*24+20; else t=di*24+(HR[meal]||12);
+    const sg= t<38?'A':(t<89?'B':'C');
+    d.ing.forEach(([n,g])=>{ const x=need[m[0]][n]=need[m[0]][n]||{}; x[lab]=(x[lab]||0)+g*por; if(inWin) win[m[0]][n]=(win[m[0]][n]||0)+g*por;
+      const sx=seg[m[0]][n]=seg[m[0]][n]||{A:0,B:0,C:0}; sx[sg]+=g*por; });
   });
   D.win={}; for(let w=1;w<=4;w++){ D.win[w]={}; Object.keys(win[w]).forEach(n=>D.win[w][n]=g2(win[w][n])); }
+  D.seg=seg;
   const r=g=> g>=10?Math.round(g):Math.round(g*10)/10;
   D.need={};
   for(let w=1;w<=4;w++){
@@ -629,12 +635,23 @@ function sundayCard(w, winItems){
       ${other.length?`<div class="muted" style="font-size:.88rem">${other.map(it=>esc(it.name)+(storeOf(it)?' ('+esc(storeOf(it))+')':'')).join(', ')}</div><div class="row"><button class="btn" id="autoArr">Montag automatisch nach ${esc(sun)} anordnen</button><button class="btn ghost" id="autoArrAll">Alle 4 Wochen</button></div><div class="muted" style="font-size:.85rem">Die App tauscht Gerichte so, dass für Sonntag und Montag möglichst viel bei ${esc(sun)} zu bekommen ist. Vorher solltest du den Zutaten in der Liste ihre Läden zuordnen.</div>`:`<div class="muted" style="font-size:.88rem">Alles für Sonntag und Montag bekommst du bei ${esc(sun)}.</div>`}</div>`;
   return h;
 }
+function tripParts(w,name){
+  // split one week's need of an ingredient into the three shopping rounds
+  const fr=sundayStore(); const sx=(D.seg&&D.seg[w]&&D.seg[w][name])||{A:0,B:0,C:0};
+  const st=S.assign[name]||''; const other= !!st && st!==fr;
+  const r= g=>g2(g);
+  if(other) return [{trip:'r1',key:'so:'+name,g:r(sx.A),warn:true},{trip:'r2',key:'r2:'+name,g:r(sx.B+sx.C)}].filter(p=>p.g>0.05);
+  return [{trip:'r1',key:'so:'+name,g:r(sx.A+sx.B)},{trip:'r3',key:'r3:'+name,g:r(sx.C)}].filter(p=>p.g>0.05);
+}
+const TRIPLBL={r1:'Sa/So',r2:'Di',r3:'Do'};
 function tripItems(w){
   const out=[];
-  D.shop[w].items.forEach(([cat,name,g])=>{ const wn=Math.min(g,(D.win[w]&&D.win[w][name])||0); const rest=g-wn;
-    if(wn>0) out.push({key:'so:'+name,name,cat,g:wn,amt:amtStr(name,wn)+(rest>0.5?` · Rest Di: ${fmtG(rest)}\u00a0g`:''),trip:'so',extra:false});
-    if(rest>0.5) out.push({key:name,name,cat,g:rest,amt:amtStr(name,rest)+(wn>0?` · Sonntag schon: ${fmtG(wn)}\u00a0g`:''),trip:'di',extra:false}); });
-  (S.extra[w]||[]).forEach(e=>out.push({key:'x:'+e.id,name:e.name,cat:'Eigene Artikel',amt:e.amt||'',extra:true,id:e.id,trip:'di'}));
+  D.shop[w].items.forEach(([cat,name,g])=>{
+    const parts=tripParts(w,name);
+    parts.forEach(p=>{ const others=parts.filter(q=>q!==p).map(q=>`${TRIPLBL[q.trip]}: ${fmtG(q.g)} g`).join(' · ');
+      out.push({key:p.key,name,cat,g:p.g,trip:p.trip,warn:p.warn,extra:false,amt:amtStr(name,p.g)+(others?` · ${others}`:'')}); });
+  });
+  (S.extra[w]||[]).forEach(e=>out.push({key:'x:'+e.id,name:e.name,cat:'Eigene Artikel',amt:e.amt||'',extra:true,id:e.id,trip:(S.assign['x:'+e.id]&&S.assign['x:'+e.id]!==sundayStore())?'r2':'r3'}));
   return out;
 }
 function shopItems(w){
@@ -646,7 +663,7 @@ function shopItems(w){
 }
 function storeKey(it){ return it.extra||it.spice?it.key:it.name; }
 function storeOf(it){ return S.assign[storeKey(it)]||''; }
-function isDone(w,it){ const c=S.checks[w]||{}; if(c[it.key]) return true; if(!it.trip && !it.extra && c['so:'+it.name] && (it.g-(it.win||0))<=0.5) return true; return false; }
+function isDone(w,it){ const c=S.checks[w]||{}; if(c[it.key]) return true; if(!it.trip && !it.extra){ const ps=tripParts(w,it.name); if(ps.length && ps.every(p=>c[p.key])) return true; } return false; }
 function isHomeManual(w,it){
   const v=S.home&&S.home[w]&&S.home[w][it.key]; if(!v) return false;
   if(it.spice||it.extra||!stockHas(it.name)) return true;
@@ -655,8 +672,8 @@ function isHomeManual(w,it){
   return !(now < at-0.5 && now+0.5 < remainingNeed(w,it.name));
 }
 function isHomeAuto(w,it){ if(it.extra||it.spice) return false; if(S.homeOff&&S.homeOff[w]&&S.homeOff[w][it.key]) return false;
-  if(it.trip==='so') return stockHas(it.name) && S.stock[it.name]+0.5>=it.g;
-  if(it.trip==='di') return stockHas(it.name) && S.stock[it.name]+0.5>=remainingNeed(w,it.name);
+  if(it.trip==='r1') return stockHas(it.name) && S.stock[it.name]+0.5>=it.g;
+  if(it.trip) return stockHas(it.name) && S.stock[it.name]+0.5>=remainingNeed(w,it.name);
   return stockCovers(w,it.name); }
 function isHome(w,it){ return !isDone(w,it) && (isHomeManual(w,it)||isHomeAuto(w,it)); }
 function isClosed(w,it){ return isDone(w,it)||isHome(w,it); }
@@ -670,9 +687,9 @@ function daysHtml(w,it){
 function itemRow(w,it){
   const st=storeOf(it); const dn=isDone(w,it); const hm=isHome(w,it);
   const opts=['<option value="">Laden wählen</option>'].concat(S.stores.map(s=>`<option${s===st?' selected':''}>${esc(s)}</option>`)).join('');
-  const part=(!dn&&!hm&&!it.spice&&!it.extra&&stockHas(it.name)&&S.stock[it.name]>0.5)?Math.max(0,(it.trip==='so'?it.g:remainingNeed(w,it.name))-S.stock[it.name]):0;
+  const part=(!dn&&!hm&&!it.spice&&!it.extra&&stockHas(it.name)&&S.stock[it.name]>0.5)?Math.max(0,(it.trip==='r1'?it.g:Math.min(it.g,remainingNeed(w,it.name)))-S.stock[it.name]):0;
   return `<div class="item${dn?' done':''}${hm?' home':''}${part>0.5?' partial':''}"><button class="check" data-check="${esc(it.key)}" aria-label="${esc(it.name)} gekauft" aria-pressed="${dn}"><span><svg viewBox="0 0 24 24" fill="none" stroke-width="3.5"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></button>
-    <div style="min-width:0"><div class="iname">${esc(it.name)}</div><div class="meta"><span class="iamt">${hm?('<b class="homelbl">'+(isHomeManual(w,it)?'zu Hause vorhanden':'Vorrat reicht · zu Hause')+'</b>'):esc(it.amt)}</span>${(!it.spice&&!it.extra&&stockHas(it.name))?(part>0.5?`<span class="iamt partlbl">· Vorrat ${fmtAmt(it.name,S.stock[it.name])} – noch kaufen: ${fmtAmt(it.name, unitOf(it.name)==='pc' ? Math.ceil(part/pcWeight(it.name)-1e-9)*pcWeight(it.name) : part)}</span>`:`<span class="iamt">· Vorrat ${fmtAmt(it.name,S.stock[it.name])}</span>`):''}${daysHtml(w,it)}<select class="store${st?'':' none'}" data-store="${esc(storeKey(it))}" aria-label="Laden für ${esc(it.name)}">${opts}</select></div></div>
+    <div style="min-width:0"><div class="iname">${esc(it.name)}</div><div class="meta"><span class="iamt">${hm?('<b class="homelbl">'+(isHomeManual(w,it)?'zu Hause vorhanden':'Vorrat reicht · zu Hause')+'</b>'):esc(it.amt)}</span>${(!it.spice&&!it.extra&&stockHas(it.name))?(part>0.5?`<span class="iamt partlbl">· Vorrat ${fmtAmt(it.name,S.stock[it.name])} – noch kaufen: ${fmtAmt(it.name, unitOf(it.name)==='pc' ? Math.ceil(part/pcWeight(it.name)-1e-9)*pcWeight(it.name) : part)}</span>`:`<span class="iamt">· Vorrat ${fmtAmt(it.name,S.stock[it.name])}</span>`):''}${daysHtml(w,it)}${it.warn?`<span class="dchip miss">sonst ${esc(storeOf(it))} · bis Di gebraucht</span>`:''}<select class="store${st?'':' none'}" data-store="${esc(storeKey(it))}" aria-label="Laden für ${esc(it.name)}">${opts}</select></div></div>
     <div class="side"><button class="homebtn" data-home="${esc(it.key)}" aria-pressed="${hm}" aria-label="${esc(it.name)}: ${hm?'doch einkaufen':'habe ich zu Hause'}" title="Habe ich zu Hause"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/><path d="M10 20v-5h4v5"/></svg></button>
     ${it.extra?`<button class="del" data-del="${esc(it.id)}" aria-label="${esc(it.name)} löschen">✕</button>`:''}</div></div>`;
 }
@@ -684,15 +701,17 @@ function viewEinkauf(){
   const nDone=items.filter(it=>isDone(w,it)).length, nHome=items.filter(it=>isHome(w,it)).length, closed=items.filter(it=>isClosed(w,it)).length;
   let h=weekSeg(w,'sw')+`<div class="theme">${esc(THEMES[w])}</div>
     <div class="toolbar"><div class="seg" role="group" aria-label="Sortieren nach" style="flex:1 1 220px">
-      <button data-sort="laden" aria-pressed="${shopSort==='laden'}">Laden</button><button data-sort="bereich" aria-pressed="${shopSort==='bereich'}">Bereich</button><button data-sort="tag" aria-pressed="${shopSort==='tag'}">Tag</button><button data-sort="trip" aria-pressed="${shopSort==='trip'}">So/Di</button></div>
+      <button data-sort="laden" aria-pressed="${shopSort==='laden'}">Laden</button><button data-sort="bereich" aria-pressed="${shopSort==='bereich'}">Bereich</button><button data-sort="tag" aria-pressed="${shopSort==='tag'}">Tag</button><button data-sort="trip" aria-pressed="${shopSort==='trip'}">Runden</button></div>
       <button class="toggle" id="hideDone" aria-pressed="${hideDone}">Erledigte ausblenden</button></div>
     <div class="progress"><div class="num"><b>${items.length-closed}</b> noch zu kaufen · ${nDone} gekauft · ${nHome} zu Hause</div><div class="bar"><i style="width:${items.length?closed/items.length*100:0}%"></i></div></div>
     <div class="legend muted"><span><span class="mini check-mini"></span> gekauft</span><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" width="16" height="16"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg> habe ich zu Hause</span><span><span class="mini" style="background:#f5d76e"></span> teilweise zu Hause</span></div>`;
   if(!hasSetup()) h+=`<div class="panel prep stack" style="margin-top:12px"><div><b>Noch keine Läden zugeordnet.</b> Hast du eine Sicherung gespeichert? Dann lade sie hier, und alle Läden und Haken sind wieder da.</div><div class="row"><label class="btn" for="shopBk">Sicherung laden</label><input type="file" id="shopBk" accept=".json,application/json,text/plain" hidden></div><div id="shopBkMsg" class="muted" role="status"></div></div>`;
   let groups;
   if(shopSort==='trip'){
-    h+=sundayCard(w, items.filter(it=>it.trip==='so'));
-    groups=[{title:`Sonntag bei ${sundayStore()} · bis Di 14 Uhr`, items:items.filter(it=>it.trip==='so')},{title:'Dienstag · Rest der Woche', items:items.filter(it=>it.trip==='di')}];
+    const fr=sundayStore();
+    h+=sundayCard(w, items.filter(it=>it.trip==='r1'));
+    h+=`<div class="muted" style="font-size:.85rem;margin-top:10px">So teilt die App ein: <b>Sa/So</b> bei ${esc(fr)} alles bis Di 14 Uhr, dazu ${esc(fr)}-Sachen bis Do 17 Uhr. <b>Di</b> alles, was du in anderen Läden kaufst. <b>Do</b> bei ${esc(fr)} alles ab Do-Abend bis Sonntag. Zutaten ohne Laden zählen wie ${esc(fr)}.</div>`;
+    groups=[{title:`Sa/So · ${fr} · bis Di 14 Uhr`, items:items.filter(it=>it.trip==='r1')},{title:'Di · Aldi, Edeka & Co. · Rest der Woche', items:items.filter(it=>it.trip==='r2'), byStore:true},{title:`Do · ${fr} · Do-Abend bis So`, items:items.filter(it=>it.trip==='r3')}];
   } else if(shopSort==='laden'){
     groups=S.stores.concat(['']).map(st=>({title:st||'Noch kein Laden', items: st ? items.filter(it=>storeOf(it)===st) : items.filter(it=>!S.stores.includes(storeOf(it)))}));
   } else if(shopSort==='tag'){
@@ -711,7 +730,10 @@ function viewEinkauf(){
     if(hideDone) list=list.filter(it=>!isClosed(w,it));
     h+=`<section class="group"><h3><span>${esc(g.title)}</span><span class="muted num" style="font-family:var(--f-body);font-size:.85rem">${open} offen</span></h3>`;
     if(!list.length){ h+=`<div class="list"><div class="empty">Alles erledigt.</div></div></section>`; return; }
-    if(shopSort==='laden'||shopSort==='tag'||shopSort==='trip'){
+    if(g.byStore){
+      const sts=[...new Set(list.map(i=>storeOf(i)||'Noch kein Laden'))].sort((a,b)=>(S.stores.indexOf(a)+99*(a==='Noch kein Laden'))-(S.stores.indexOf(b)+99*(b==='Noch kein Laden')));
+      h+=sts.map(st=>`<div class="subhead">${esc(st)}</div><div class="list">${list.filter(i=>(storeOf(i)||'Noch kein Laden')===st).map(it=>itemRow(w,it)).join('')}</div>`).join('');
+    } else if(shopSort==='laden'||shopSort==='tag'||shopSort==='trip'){
       const cats=[...new Set(list.map(i=>i.cat))];
       h+=cats.map(c=>`<div class="subhead">${esc(c)}</div><div class="list">${list.filter(i=>i.cat===c).map(it=>itemRow(w,it)).join('')}</div>`).join('');
     } else {
