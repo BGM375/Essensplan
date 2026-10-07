@@ -962,8 +962,10 @@ function viewVorrat(){
 /* ---------- Training & Dehnen ---------- */
 const T = JSON.parse(document.getElementById('trainingdata').textContent);
 const FIT_TIME='19:00', STRETCH_TIME_TRAIN='19:55', STRETCH_TIME_REST='19:00';
+// from 12 Oct 2026 (next Monday): legs on Tuesday, back & shoulders on Thursday (more rest between the upper-body days)
+const TRAIN_DAYS_NEW={'0':'push','1':'legs','3':'pull','5':'core'}, TRAIN_SWITCH='2026-10-12';
 function fitPlan(date){
-  const pos=cyclePos(date); const wkey=T.days[String(pos.dow)]||null;
+  const pos=cyclePos(date); const map= iso(date)>=TRAIN_SWITCH ? TRAIN_DAYS_NEW : T.days; const wkey=map[String(pos.dow)]||null;
   return {pos, phase:pos.week, wkey, skey: wkey?'post_'+wkey:'rest'};
 }
 function fitRec(dk){ S.fit=S.fit||{}; S.fit[dk]=S.fit[dk]||{ex:{}}; S.fit[dk].ex=S.fit[dk].ex||{}; return S.fit[dk]; }
