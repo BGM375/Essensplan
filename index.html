@@ -365,17 +365,20 @@ function skipKey(date,meal){ return iso(date)+'|'+meal; }
 function isSkipped(date,meal){ return !!(S.skips&&S.skips[skipKey(date,meal)]); }
 function rowDate(m){ return addDays(cycleBase(m[0]),(m[0]-1)*7+DAYS.indexOf(m[1])); }
 function lunchFromDinner(m){ return m[2]==='Mittagessen' && /aufwärmen/.test(m[5]||''); }
+function isSplit(dinnerDate){ return !!(S.split&&S.split[iso(dinnerDate)]); }
+function lunchFresh(m,date){ return lunchFromDinner(m) && isSplit(addDays(date,-1)); }   // lunch cooked fresh as a single portion
+function toggleSplit(dinnerDate){ S.split=S.split||{}; const k=iso(dinnerDate); if(S.split[k]) delete S.split[k]; else S.split[k]=true; recomputeAll(); persist(); }
 function rowSkipped(m,date){
   date=date||rowDate(m);
   if(isSkipped(date,m[2])) return 'self';
-  if(lunchFromDinner(m) && isSkipped(addDays(date,-1),'Abendessen')) return 'dinner';
+  if(lunchFromDinner(m) && isSkipped(addDays(date,-1),'Abendessen') && !isSplit(addDays(date,-1))) return 'dinner';
   return '';
 }
 function effPor(m,date){
   date=date||rowDate(m);
   if(rowSkipped(m,date)) return 0;
-  if(m[2]==='Abendessen'){ let p=m[6]||2; if(p>1 && isSkipped(addDays(date,1),'Mittagessen')) p-=1; return p; }
-  if(m[2]==='Mittagessen') return rowPor(m);
+  if(m[2]==='Abendessen'){ let p=m[6]||2; if(isSplit(date)) p=1; if(p>1 && isSkipped(addDays(date,1),'Mittagessen')) p-=1; return p; }
+  if(m[2]==='Mittagessen') return lunchFresh(m,date)?1:rowPor(m);
   return 1;
 }
 function toggleSkip(date,meal){ S.skips=S.skips||{}; const k=skipKey(date,meal); if(S.skips[k]) delete S.skips[k]; else S.skips[k]=true; recomputeAll(); persist(); }
@@ -425,7 +428,7 @@ function computeNeeds(){
   const AB=['Mo','Di','Mi','Do','Fr','Sa','So'], ORDER=['So davor'].concat(AB);
   const need={1:{},2:{},3:{},4:{}}; const win={1:{},2:{},3:{},4:{}}; const seg={1:{},2:{},3:{},4:{}};
   EP.forEach(m=>{
-    const meal=m[2], hint=m[5]||''; if(meal==='Mittagessen' && /aufwärmen/.test(hint)) return;
+    const meal=m[2], hint=m[5]||''; const freshLunch= meal==='Mittagessen' && /aufwärmen/.test(hint) && lunchFresh(m,rowDate(m)); if(meal==='Mittagessen' && /aufwärmen/.test(hint) && !freshLunch) return;
     const d=D.dishes[m[4]]; if(!d) return; const di=DAYS.indexOf(m[1]);
     let lab;
     if(/Start-Gericht/.test(hint)) lab='So davor';
@@ -533,16 +536,16 @@ function mealCard(m, isNow, date){
   const sk=rowSkipped(m,date);
   if(sk) return `<div class="meal gone"><div class="time">${esc(m[3])}</div><div class="card"><div class="kind">${esc(mealName(m[2]))} · ausgelassen</div><div class="name muted" style="text-decoration:line-through">${esc(d.n)}</div>
     <div class="muted" style="font-size:.85rem;margin-top:4px">${sk==='dinner'?'Entfällt, weil das Abendessen gestern ausgelassen wurde.':'Zutaten stehen diese Woche nicht in der Einkaufsliste.'}</div>
-    ${sk==='self'?`<div class="cookrow"><button class="cookbtn ghostbtn" data-skip="${esc(m[2])}">Doch essen</button></div>`:''}</div></div>`;
-  const ext=isExternal(m); const left=isLeftover(m)||ext; const mpor=(m[2]==='Abendessen'||m[2]==='Mittagessen')?(effPor(m,date)||rowPor(m)):1; const miss=(!done&&!left)?missingFor(m[4],mpor):[];
+    ${sk==='self'?`<div class="cookrow"><button class="cookbtn ghostbtn" data-skip="${esc(m[2])}">Doch essen</button></div>`:''}${sk==='dinner'?`<div class="cookrow"><button class="cookbtn" data-split="${iso(addDays(date,-1))}">Stattdessen heute einzeln frisch kochen</button></div>`:''}</div></div>`;
+  const ext=isExternal(m); const fresh=lunchFresh(m,date); const left=(isLeftover(m)&&!fresh)||ext; const mpor=(m[2]==='Abendessen'||m[2]==='Mittagessen')?(effPor(m,date)||rowPor(m)):1; const miss=(!done&&!left)?missingFor(m[4],mpor):[];
   const label=m[2]==='Abendessen'||m[2]==='Mittagessen'?'Gekocht':'Zubereitet';
   const act = left ? `<span class="muted" style="font-size:.85rem">${ext?'Grillen: wird extern mitgebracht, nichts zu kaufen oder abzuziehen':'Reste von gestern, nichts abzuziehen'}</span>`
     : `<button class="cookbtn" data-cook="${esc(m[2])}" aria-pressed="${done}">${done?'✓ '+label+' · rückgängig':label+' – vom Vorrat abziehen'}</button>`;
   return `<div class="meal${isNow?' now':''}${done?' cooked':''}">
     <div class="time">${esc(m[3])}</div>
     <div class="card"><button class="cardbtn" data-dish="${esc(m[4])}" data-por="${mpor}"><div class="kind">${esc(mealName(m[2]))}${m[7]?' <span class="swaptag">getauscht</span>':''}</div><div class="name">${esc(d.n)}</div>
-    <div class="chips"><span class="chip">${fmt(d.kcal)} kcal</span><span class="chip p">${fmt(d.p)} g Protein</span>${m[5]?`<span class="chip hint">${esc(m[5])}</span>`:''}${miss.length?`<span class="chip miss">Vorrat reicht nicht: ${esc(miss.map(([n,g])=>n+' (−'+fmtAmt(n,g)+')').join(', '))}</span>`:''}</div></button>
-    <div class="cookrow row" style="gap:8px">${act}${canSwap(m[2],DAYS.indexOf(m[1]))?`<button class="cookbtn ghostbtn" data-swap="${m[0]}|${DAYS.indexOf(m[1])}|${esc(m[2])}">⇄ Tauschen</button>`:''}${done?'':`<button class="cookbtn ghostbtn" data-skip="${esc(m[2])}">⊘ Diese Woche auslassen</button>`}</div>${m[2]==='Abendessen'&&mpor===1&&m[6]===2?'<div class="muted" style="font-size:.8rem;margin-top:6px">Nur 1 Portion kochen, das Mittagessen morgen ist ausgelassen.</div>':''}</div></div>`;
+    <div class="chips"><span class="chip">${fmt(d.kcal)} kcal</span><span class="chip p">${fmt(d.p)} g Protein</span>${fresh?`<span class="chip hint">Heute einzeln frisch kochen (1 Portion)</span>`:(m[2]==='Abendessen'&&isSplit(date)?`<span class="chip hint">Nur 1 Portion – morgen Mittag kochst du frisch</span>`:(m[5]?`<span class="chip hint">${esc(m[5])}</span>`:''))}${miss.length?`<span class="chip miss">Vorrat reicht nicht: ${esc(miss.map(([n,g])=>n+' (−'+fmtAmt(n,g)+')').join(', '))}</span>`:''}</div></button>
+    <div class="cookrow row" style="gap:8px">${act}${canSwap(m[2],DAYS.indexOf(m[1]))?`<button class="cookbtn ghostbtn" data-swap="${m[0]}|${DAYS.indexOf(m[1])}|${esc(m[2])}">⇄ Tauschen</button>`:''}${done?'':`<button class="cookbtn ghostbtn" data-skip="${esc(m[2])}">⊘ Diese Woche auslassen</button>`}${m[2]==='Abendessen'&&m[6]===2&&!done?`<button class="cookbtn ghostbtn" data-split="${iso(date)}">${isSplit(date)?'↺ Doch doppelt kochen':'½ Nur 1 Portion – morgen Mittag frisch'}</button>`:''}${fresh&&!done?`<button class="cookbtn ghostbtn" data-split="${iso(addDays(date,-1))}">↺ Doch Reste von gestern</button>`:''}</div>${m[2]==='Abendessen'&&mpor===1&&m[6]===2&&!isSplit(date)?'<div class="muted" style="font-size:.8rem;margin-top:6px">Nur 1 Portion kochen, das Mittagessen morgen ist ausgelassen.</div>':''}</div></div>`;
 }
 
 function viewHeute(){
@@ -589,6 +592,7 @@ function viewHeute(){
   bindFitButtons($('#view'), ()=>keepScroll(render));
   document.querySelectorAll('[data-cook]').forEach(b=>b.onclick=()=>{ const m=ms.find(x=>x[2]===b.dataset.cook); if(m){ toggleCooked(date,m); keepScroll(render); } });
   document.querySelectorAll('[data-skip]').forEach(b=>b.onclick=()=>{ toggleSkip(date,b.dataset.skip); keepScroll(render); });
+  document.querySelectorAll('[data-split]').forEach(b=>b.onclick=()=>{ toggleSplit(parseISO(b.dataset.split)); keepScroll(render); });
 }
 
 function weekSeg(cur, id){ return `<div class="seg" role="group" aria-label="Woche wählen">${[1,2,3,4].map(w=>`<button data-${id}="${w}" aria-pressed="${w===cur}">Woche ${w}</button>`).join('')}</div>`; }
@@ -881,14 +885,14 @@ function fmtAmt(n,g){ if(unitOf(n)==='pc'){ const v=r1(g/pcWeight(n)); return v.
 function weekNeed(w,n){ const x=D.need&&D.need[w]&&D.need[w][n]; return x? x.reduce((s,[,g])=>s+g,0):0; }
 /* remaining need: full week minus meals already cooked in the matching cycle */
 let OCC={1:[],2:[],3:[],4:[]};
-function rebuildOCC(){ OCC={1:[],2:[],3:[],4:[]}; EP.forEach(m=>{ const d=D.dishes[m[4]]; if(!d||isLeftover(m)||isExternal(m)) return; OCC[m[0]].push({row:m,pw:m[0],di:DAYS.indexOf(m[1]),meal:m[2],id:m[4],por:(m[2]==='Abendessen'||m[2]==='Mittagessen')?rowPor(m):1}); }); }
+function rebuildOCC(){ OCC={1:[],2:[],3:[],4:[]}; EP.forEach(m=>{ const d=D.dishes[m[4]]; if(!d||isExternal(m)) return; if(isLeftover(m) && !lunchFromDinner(m)) return; OCC[m[0]].push({row:m,pw:m[0],di:DAYS.indexOf(m[1]),meal:m[2],id:m[4],por:(m[2]==='Abendessen'||m[2]==='Mittagessen')?rowPor(m):1}); }); }
 recomputeAll();
 function cycleBase(w){ const today=new Date(); today.setHours(0,0,0,0); const pos=cyclePos(today); const start=parseISO(S.start);
   let k=pos.before?0:Math.floor(pos.diff/28); if(!pos.before && w<pos.week) k+=1; return addDays(start,k*28); }
 function remainingNeed(w,n){
   const base=cycleBase(w); let s=0;
   OCC[w].forEach(o=>{ const d=D.dishes[o.id]; const ing=d.ing.find(x=>x[0]===n); if(!ing) return;
-    const date=addDays(base,(o.pw-1)*7+o.di); if(S.cooked&&S.cooked[cookKey(date,o.meal)]) return; const pr=(o.meal==='Abendessen'||/Start-Gericht/.test(o.row[5]||''))?effPor(o.row,date):(rowSkipped(o.row,date)?0:1); s+=ing[1]*pr; });
+    const date=addDays(base,(o.pw-1)*7+o.di); if(S.cooked&&S.cooked[cookKey(date,o.meal)]) return; if(lunchFromDinner(o.row) && !lunchFresh(o.row,date)) return; const pr= lunchFromDinner(o.row) ? (rowSkipped(o.row,date)?0:1) :(o.meal==='Abendessen'||/Start-Gericht/.test(o.row[5]||''))?effPor(o.row,date):(rowSkipped(o.row,date)?0:1); s+=ing[1]*pr; });
   return s;
 }
 function stockCovers(w,n){ const need=remainingNeed(w,n); return weekNeed(w,n)>0 && stockHas(n) && S.stock[n]+0.5>=need; }
