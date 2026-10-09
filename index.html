@@ -193,6 +193,10 @@ h2{font-family:var(--f-display);font-weight:600;font-size:1.15rem;margin:0}
 .setchk{width:58px;height:34px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--muted);font-size:1.05rem;font-weight:700}
 .setin.sdone .setchk{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
 .setin.sdone input{border-color:var(--accent)}
+.xrow{display:flex;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
+.qty{display:flex;align-items:center;gap:6px;flex:none}
+.qty button{width:36px;height:36px;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);font-size:1.1rem;font-weight:700;color:var(--fg)}
+.qty span{min-width:28px;text-align:center;font-weight:700}
 .subhead{font-size:.75rem;letter-spacing:.07em;text-transform:uppercase;font-weight:700;color:var(--muted);margin:10px 2px 5px}
 .group h3 + .subhead{margin-top:2px}
 .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.85rem;margin-top:8px;align-items:center}
@@ -359,7 +363,50 @@ function cyclePos(date){
   return {before: diff<0, diff, week:Math.floor(idx/7)+1, dow:idx%7};
 }
 function mealsFor(week, dayName){ return D.plan.filter(p=>p[0]===week && p[1]===dayName).sort((a,b)=>a[3].localeCompare(b[3])); }
-function dayTotals(ms,date){ return ms.reduce((a,m)=>{ if(date && rowSkipped(m,date)) return a; const d=D.dishes[m[4]]; a.kcal+=d.kcal; a.p+=d.p; return a; },{kcal:0,p:0}); }
+function dayTotals(ms,date){ const t=ms.reduce((a,m)=>{ if(date && rowSkipped(m,date)) return a; const d=D.dishes[m[4]]; a.kcal+=d.kcal; a.p+=d.p; return a; },{kcal:0,p:0}); if(date){ const x=extraTotals(date); t.kcal+=x.kcal; t.p+=x.p; } return t; }
+/* ---------- extra food eaten outside the plan ---------- */
+const FOOD_DEFAULT=[
+ {id:'wmb',n:'Weltmeisterbrötchen (Aldi, ca. 75 g)',kcal:257,p:9.8,f:9.8,kh:29.3,salt:1.1},
+ {id:'frik_nacken',n:'Schweinenacken-Frikadelle (170 g roh)',kcal:339,p:23.3,f:25.5,kh:4.0,salt:2.33},
+ {id:'frik_chili',n:'Chili-Frikadelle (140 g Brät + Gouda)',kcal:310,p:21.8,f:23.9,kh:2.8,salt:1.05},
+ {id:'feta_rolle',n:'Feta-Rind-Rolle (130 g Brät + Feta)',kcal:316,p:31.2,f:25.3,kh:0.5,salt:2.6},
+ {id:'nacken_grill',n:'Schweinenacken-Grillstück (120 g roh)',kcal:312,p:24.0,f:25.0,kh:0,salt:null},
+];
+function foodCatalog(){ return FOOD_DEFAULT.concat(S.foods||[]); }
+function foodById(id){ return foodCatalog().find(f=>f.id===id); }
+function eatenOn(date){ return (S.eaten&&S.eaten[iso(date)])||[]; }
+function extraTotals(date){ return eatenOn(date).reduce((a,e)=>{ const f=foodById(e.id); if(!f) return a; a.kcal+=f.kcal*e.q; a.p+=f.p*e.q; a.f+=(f.f||0)*e.q; a.kh+=(f.kh||0)*e.q; return a; },{kcal:0,p:0,f:0,kh:0}); }
+function qtyStr(q){ return String(q).replace('.',',').replace(',5',' ½').replace(/^0 ½$/,'½'); }
+function extrasPanel(date){
+  const list=eatenOn(date); const t=extraTotals(date);
+  let h=`<div class="panel stack" style="margin-bottom:14px"><div class="row" style="justify-content:space-between"><b>Zusätzlich gegessen</b><button class="cookbtn" id="addFood">+ Hinzufügen</button></div>`;
+  if(!list.length) h+=`<div class="muted" style="font-size:.88rem">Isst du unterwegs etwas außerhalb des Plans, trag es hier ein. Es zählt dann zur Tagesbilanz.</div>`;
+  else {
+    h+=list.map((e,i)=>{ const f=foodById(e.id); if(!f) return ''; return `<div class="xrow"><div style="min-width:0;flex:1"><div class="iname">${esc(f.n)}</div><div class="iamt num">${fmt(f.kcal*e.q)} kcal · ${fmtG(f.p*e.q)} g Protein · ${fmtG((f.f||0)*e.q)} g Fett · ${fmtG((f.kh||0)*e.q)} g KH</div></div>
+      <div class="qty"><button data-xq="${i}" data-d="-0.5" aria-label="weniger">−</button><span class="num">${qtyStr(e.q)}</span><button data-xq="${i}" data-d="0.5" aria-label="mehr">+</button></div></div>`; }).join('');
+    h+=`<div class="muted num" style="font-size:.85rem">Extra gesamt: ${fmt(t.kcal)} kcal · ${fmtG(t.p)} g Protein · ${fmtG(t.f)} g Fett · ${fmtG(t.kh)} g KH</div>`;
+  }
+  return h+'</div>';
+}
+function openFoodPicker(date){
+  const dk=iso(date);
+  let h=sheetHead('Zusätzlich gegessen · '+date.toLocaleDateString('de-DE',{weekday:'long',day:'numeric',month:'long'}),'Was hast du gegessen?');
+  h+=`<p class="muted" style="margin:6px 0 10px">Tippe auf ein Lebensmittel, um 1 Stück hinzuzufügen. Die Menge änderst du danach in ½-Schritten.</p><div class="stack">`+
+   foodCatalog().map(f=>`<button class="day dayfit pick" data-addfood="${esc(f.id)}"><div style="min-width:0"><b>${esc(f.n)}</b><div class="muted num" style="font-size:.85rem">${fmt(f.kcal)} kcal · ${fmtG(f.p)} g Protein · ${fmtG(f.f||0)} g Fett · ${fmtG(f.kh||0)} g KH</div></div>${String(f.id).startsWith('c:')?`<span class="del" data-delfood="${esc(f.id)}" role="button" aria-label="Aus Liste löschen">✕</span>`:''}</button>`).join('')+`</div>
+   <h3 class="eyebrow" style="margin:18px 0 6px">Neues Lebensmittel (Werte pro Stück/Portion)</h3>
+   <form id="newFood" class="stack"><input id="nfName" placeholder="Name, z. B. Bratwurst im Brötchen" required aria-label="Name" style="border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--surface);color:var(--fg)">
+   <div class="gearrow">${[['nfK','kcal'],['nfP','Eiweiß g'],['nfF','Fett g'],['nfC','Kohlenhydrate g']].map(([id,l])=>`<div class="field"><label for="${id}">${l}</label><input id="${id}" type="number" inputmode="decimal" step="0.1" min="0" required></div>`).join('')}</div>
+   <button class="btn" type="submit">Speichern und hinzufügen</button></form>`;
+  sheetOpen(h);
+  const inner=$('#sheetInner');
+  const add=(id)=>{ S.eaten=S.eaten||{}; const l=S.eaten[dk]=S.eaten[dk]||[]; const ex=l.find(e=>e.id===id); if(ex) ex.q+=1; else l.push({id,q:1}); persist(); closeSheet(); keepScroll(render); };
+  inner.querySelectorAll('[data-addfood]').forEach(b=>b.onclick=(ev)=>{ if(ev.target.closest('[data-delfood]')) return; add(b.dataset.addfood); });
+  inner.querySelectorAll('[data-delfood]').forEach(x=>x.onclick=(ev)=>{ ev.stopPropagation(); S.foods=(S.foods||[]).filter(f=>f.id!==x.dataset.delfood); persist(); openFoodPicker(date); });
+  inner.querySelector('#newFood').onsubmit=ev=>{ ev.preventDefault(); const num=id=>{ const v=parseFloat(($('#'+id).value||'0').replace(',','.')); return isNaN(v)?0:v; };
+    const f={id:'c:'+Date.now().toString(36), n:$('#nfName').value.trim(), kcal:num('nfK'), p:num('nfP'), f:num('nfF'), kh:num('nfC')}; if(!f.n) return;
+    S.foods=(S.foods||[]).concat([f]); add(f.id); };
+}
+
 /* ---------- skip a meal in this week's occurrence ---------- */
 function skipKey(date,meal){ return iso(date)+'|'+meal; }
 function isSkipped(date,meal){ return !!(S.skips&&S.skips[skipKey(date,meal)]); }
@@ -570,6 +617,7 @@ function viewHeute(){
   const ms=mealsFor(pos.week,dayName); const t=dayTotals(ms,date);
   h+=`<div class="totals"><div class="meter"><div class="eyebrow">Energie</div><b class="num">${fmt(t.kcal)}</b> <span class="muted">/ ${fmt(TARGET.kcal)} kcal</span><div class="bar"><i style="width:${Math.min(100,t.kcal/TARGET.kcal*100)}%"></i></div></div>
     <div class="meter"><div class="eyebrow">Protein</div><b class="num">${fmt(t.p)}</b> <span class="muted">/ ${TARGET.p} g</span><div class="bar p"><i style="width:${Math.min(100,t.p/TARGET.p*100)}%"></i></div></div></div>`;
+  h+=extrasPanel(date);
   const nowMin = offset===0 ? new Date().getHours()*60+new Date().getMinutes() : -1;
   let nowIdx=-1; if(nowMin>=0){ ms.forEach((m,i)=>{ const [hh,mm]=m[3].split(':').map(Number); if(nowMin>=hh*60+mm-90) nowIdx=i; }); }
   h+='<div class="timeline">'+ms.map((m,i)=>({time:m[3],html:mealCard(m,i===nowIdx,date)})).concat(fitItems(date)).sort((a,b)=>a.time.localeCompare(b.time)).map(x=>x.html).join('')+'</div>';
@@ -593,6 +641,8 @@ function viewHeute(){
   document.querySelectorAll('[data-cook]').forEach(b=>b.onclick=()=>{ const m=ms.find(x=>x[2]===b.dataset.cook); if(m){ toggleCooked(date,m); keepScroll(render); } });
   document.querySelectorAll('[data-skip]').forEach(b=>b.onclick=()=>{ toggleSkip(date,b.dataset.skip); keepScroll(render); });
   document.querySelectorAll('[data-split]').forEach(b=>b.onclick=()=>{ toggleSplit(parseISO(b.dataset.split)); keepScroll(render); });
+  const af=$('#addFood'); if(af) af.onclick=()=>openFoodPicker(date);
+  document.querySelectorAll('[data-xq]').forEach(b=>b.onclick=()=>{ const l=S.eaten[iso(date)]; const e=l[+b.dataset.xq]; e.q=Math.round((e.q+parseFloat(b.dataset.d))*2)/2; if(e.q<=0) l.splice(+b.dataset.xq,1); persist(); keepScroll(render); });
 }
 
 function weekSeg(cur, id){ return `<div class="seg" role="group" aria-label="Woche wählen">${[1,2,3,4].map(w=>`<button data-${id}="${w}" aria-pressed="${w===cur}">Woche ${w}</button>`).join('')}</div>`; }
