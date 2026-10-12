@@ -81,7 +81,9 @@ h2{font-family:var(--f-display);font-weight:600;font-size:1.15rem;margin:0}
 
 /* segmented control */
 .seg{display:flex;background:var(--surface-2);border-radius:12px;padding:4px;gap:4px;overflow-x:auto}
-.seg button{flex:1;border:0;background:none;border-radius:9px;padding:9px 8px;font-weight:700;color:var(--muted);white-space:nowrap;min-width:0}
+.seg button{flex:1 1 auto;border:0;background:none;border-radius:9px;padding:9px 6px;font-weight:700;color:var(--muted);white-space:nowrap}
+.seg:has([data-sort]) button{font-size:.88rem;padding:9px 4px}
+.seg button small{display:block;font-weight:500;font-size:.8rem}
 .seg button[aria-pressed="true"]{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .theme{margin:10px 0 4px;color:var(--muted)}
 
@@ -201,6 +203,7 @@ h2{font-family:var(--f-display);font-weight:600;font-size:1.15rem;margin:0}
 .carrygrp .list{border-color:var(--tomato)}
 .subhead{font-size:.75rem;letter-spacing:.07em;text-transform:uppercase;font-weight:700;color:var(--muted);margin:10px 2px 5px}
 .group h3 + .subhead{margin-top:2px}
+.catlbl{font-size:.72rem;font-weight:600;color:var(--muted);margin:8px 2px 4px 10px;letter-spacing:.04em}
 .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.85rem;margin-top:8px;align-items:center}
 .legend > span{display:inline-flex;gap:6px;align-items:center}
 .mini{width:14px;height:14px;border-radius:4px;background:var(--accent);display:inline-block}
@@ -728,7 +731,13 @@ function futureNeed(w,name){
 }
 function nextTripItems(T){
   const ORD={r1:0,r2:1,r3:2}; const all=tripItems(T.w);
-  const main=all.filter(it=>it.trip===T.r);
+  let main=all.filter(it=>it.trip===T.r);
+  if(T.r==='r1'){ const m=[], by={};
+    main.forEach(it=>{ const c=by[it.name];
+      if(c && !it.extra){ c.also.push(it.key); c.gB=(c.gB||0)+(it.seg==='B'?it.g:0); c.g=g2(c.g+it.g); }
+      else { const n=Object.assign({},it,{also:[],gB:it.seg==='B'?it.g:0}); if(!it.extra) by[it.name]=n; m.push(n); } });
+    m.forEach(n=>{ if(n.extra) return; n.amt=amtStr(n.name,n.g)+(n.gB>0.05&&n.gB<n.g-0.05?` · davon ${fmtG(g2(n.gB))}\u00a0g für Di–Do`:''); });
+    main=m; }
   const carry=[]; const byName={};
   all.filter(it=>ORD[it.trip]<ORD[T.r] && !it.extra && !isDone(T.w,it) && !isHome(T.w,it) && stillNeeded(T.w,it.name)).forEach(it=>{
     const c=byName[it.name];
@@ -806,7 +815,7 @@ function viewEinkauf(){
   const w= T?T.w:shopWeek; ensureOcc(w); setHeader(T?'Nächster Einkauf':'Einkaufsliste', T?`${T.lbl} ${tripDates(T)}`:`Woche ${w}`);
   const items= T?nextTripItems(T):shopItems(w);
   const nDone=items.filter(it=>isDone(w,it)).length, nHome=items.filter(it=>isHome(w,it)).length, closed=items.filter(it=>isClosed(w,it)).length;
-  let h=(T?`<div class="seg" role="group" aria-label="Einkauf wählen">${trips.map((t,i)=>`<button data-ntrip="${i}" aria-pressed="${i===nextTripIdx}">${t.lbl} ${tripDates(t)}</button>`).join('')}</div><div class="theme">${esc(T.store)} · für Woche ${w} (${esc(THEMES[w])})</div>`:weekSeg(w,'sw')+`<div class="theme">${esc(THEMES[w])}</div>`)+`
+  let h=(T?`<div class="seg" role="group" aria-label="Einkauf wählen">${trips.map((t,i)=>`<button data-ntrip="${i}" aria-pressed="${i===nextTripIdx}">${t.lbl}<small>${tripDates(t)}</small></button>`).join('')}</div><div class="theme">${esc(T.store)} · für Woche ${w} (${esc(THEMES[w])})</div>`:weekSeg(w,'sw')+`<div class="theme">${esc(THEMES[w])}</div>`)+`
     <div class="toolbar"><div class="seg" role="group" aria-label="Sortieren nach" style="flex:1 1 220px">
       <button data-sort="next" aria-pressed="${shopSort==='next'}">Nächster</button><button data-sort="laden" aria-pressed="${shopSort==='laden'}">Laden</button><button data-sort="bereich" aria-pressed="${shopSort==='bereich'}">Bereich</button><button data-sort="tag" aria-pressed="${shopSort==='tag'}">Tag</button><button data-sort="trip" aria-pressed="${shopSort==='trip'}">Runden</button></div>
       <button class="toggle" id="hideDone" aria-pressed="${hideDone}">Erledigte ausblenden</button></div>
@@ -818,7 +827,7 @@ function viewEinkauf(){
     const carry=items.filter(it=>it.carry), main=items.filter(it=>!it.carry);
     if(T.r==='r1') h+=sundayCard(w, main);
     const ttl={r1:`${T.lbl} bei ${T.store}`, r2:`Di bei Aldi, Edeka & Co.`, r3:`Do bei ${T.store}`}[T.r];
-    groups=[{title:'Noch offen vom letzten Einkauf', items:carry, carryGrp:true},{title:ttl, items:main, bySeg:T.r==='r1', byStore:T.r==='r2'}];
+    groups=[{title:'Noch offen vom letzten Einkauf', items:carry, carryGrp:true},{title:ttl, items:main, byCat:true, byStore:T.r==='r2'}];
   } else if(shopSort==='trip'){
     const fr=sundayStore();
     h+=sundayCard(w, items.filter(it=>it.trip==='r1'));
@@ -848,8 +857,9 @@ function viewEinkauf(){
       h+=segs.map(([sg,lbl])=>{ const l=list.filter(i=>(i.seg||'A')===sg); return l.length?`<div class="subhead">${lbl}</div><div class="list">${l.map(it=>itemRow(w,it)).join('')}</div>`:''; }).join('');
     } else if(g.byStore){
       const sts=[...new Set(list.map(i=>storeOf(i)||'Noch kein Laden'))].sort((a,b)=>(S.stores.indexOf(a)+99*(a==='Noch kein Laden'))-(S.stores.indexOf(b)+99*(b==='Noch kein Laden')));
-      h+=sts.map(st=>`<div class="subhead">${esc(st)}</div><div class="list">${list.filter(i=>(storeOf(i)||'Noch kein Laden')===st).map(it=>itemRow(w,it)).join('')}</div>`).join('');
-    } else if(shopSort==='laden'||shopSort==='tag'||shopSort==='trip'){
+      const catL=l=>[...new Set(l.map(i=>i.cat))].map(c=>`<div class="catlbl">${esc(c)}</div><div class="list">${l.filter(i=>i.cat===c).map(it=>itemRow(w,it)).join('')}</div>`).join('');
+      h+=sts.map(st=>{ const l=list.filter(i=>(storeOf(i)||'Noch kein Laden')===st); return `<div class="subhead">${esc(st)}</div>`+(g.byCat?catL(l):`<div class="list">${l.map(it=>itemRow(w,it)).join('')}</div>`); }).join('');
+    } else if(g.byCat||shopSort==='laden'||shopSort==='tag'||shopSort==='trip'){
       const cats=[...new Set(list.map(i=>i.cat))];
       h+=cats.map(c=>`<div class="subhead">${esc(c)}</div><div class="list">${list.filter(i=>i.cat===c).map(it=>itemRow(w,it)).join('')}</div>`).join('');
     } else {
@@ -875,6 +885,7 @@ function viewEinkauf(){
   document.querySelectorAll('[data-home]').forEach(b=>b.onclick=()=>{ const k=b.dataset.home; const it=items.find(x=>x.key===k); S.home=S.home||{}; S.home[w]=S.home[w]||{}; S.homeOff=S.homeOff||{}; S.homeOff[w]=S.homeOff[w]||{};
     if(it && isHome(w,it)){ delete S.home[w][k]; if(isHomeAuto(w,it)) S.homeOff[w][k]=true; }
     else { S.home[w][k]= (it&&stockHas(it.name))?{s:S.stock[it.name]}:true; delete S.homeOff[w][k]; if(S.checks[w]&&S.checks[w][k]){ delete S.checks[w][k]; if(it) removePurchase(w,it); } }
+    if(it&&it.also) it.also.forEach(x=>{ if(S.home[w][k]) S.home[w][x]=S.home[w][k]; else delete S.home[w][x]; if(S.homeOff[w][k]) S.homeOff[w][x]=true; else delete S.homeOff[w][x]; if(S.checks[w]&&!S.checks[w][k]) delete S.checks[w][x]; });
     persist(); keepScroll(render); });
   document.querySelectorAll('[data-store]').forEach(s=>s.onchange=()=>{ const k=s.dataset.store; if(s.value) S.assign[k]=s.value; else delete S.assign[k]; persist(); keepScroll(render); });
   document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ const id=b.dataset.del; S.extra[w]=(S.extra[w]||[]).filter(e=>e.id!==id); delete S.assign['x:'+id]; if(S.checks[w]) delete S.checks[w]['x:'+id]; if(S.home&&S.home[w]) delete S.home[w]['x:'+id]; persist(); keepScroll(render); });
