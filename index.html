@@ -203,6 +203,18 @@ h2{font-family:var(--f-display);font-weight:600;font-size:1.15rem;margin:0}
 .carrygrp .list{border-color:var(--tomato)}
 .subhead{font-size:.75rem;letter-spacing:.07em;text-transform:uppercase;font-weight:700;color:var(--muted);margin:10px 2px 5px}
 .group h3 + .subhead{margin-top:2px}
+.histchart{width:100%;height:auto;display:block;margin-top:10px}
+.histlegend{display:flex;gap:14px;font-size:.8rem;margin-top:4px}
+.histlegend .lg{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.lg.on{background:var(--accent)} .lg.dl{background:var(--surface);border:2px solid var(--muted)}
+.hrow{display:grid;grid-template-columns:5rem 4.3rem 1fr auto;gap:6px;align-items:center;padding:10px 12px;border-top:1px solid var(--line);font-size:.92rem}
+.hrow:first-child{border-top:0}
+.nokg .hrow{grid-template-columns:5rem 1fr auto}
+.hrow .hd{color:var(--muted);white-space:nowrap} .hrow .hr{white-space:nowrap} .hrow .hk{font-weight:700}
+.rtop{color:var(--ok);font-weight:700} .rlow{color:var(--amber);font-weight:700}
+.dchip.hup{background:var(--accent-soft);color:var(--accent)} .dchip.hdown{background:var(--amber-soft);color:var(--amber)}
+.sparkbtn{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:2px 8px 2px 6px;margin-left:6px;vertical-align:middle;color:var(--accent);font-weight:700;font-size:.78rem;cursor:pointer}
+
 .catlbl{font-size:.72rem;font-weight:600;color:var(--muted);margin:8px 2px 4px 10px;letter-spacing:.04em}
 .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:.85rem;margin-top:8px;align-items:center}
 .legend > span{display:inline-flex;gap:6px;align-items:center}
@@ -367,7 +379,7 @@ function cyclePos(date){
   const idx=((diff%28)+28)%28;
   return {before: diff<0, diff, week:Math.floor(idx/7)+1, dow:idx%7};
 }
-function mealsFor(week, dayName){ return D.plan.filter(p=>p[0]===week && p[1]===dayName).sort((a,b)=>a[3].localeCompare(b[3])); }
+function mealsFor(week, dayName, date){ return D.plan.filter(p=>p[0]===week && p[1]===dayName && (p[8]!=='fri' || (date && friHome(date)))).sort((a,b)=>a[3].localeCompare(b[3])); }
 function dayTotals(ms,date){ const t=ms.reduce((a,m)=>{ if(date && rowSkipped(m,date)) return a; const d=D.dishes[m[4]]; a.kcal+=d.kcal; a.p+=d.p; return a; },{kcal:0,p:0}); if(date){ const x=extraTotals(date); t.kcal+=x.kcal; t.p+=x.p; } return t; }
 /* ---------- extra food eaten outside the plan ---------- */
 const FOOD_DEFAULT=[
@@ -420,8 +432,16 @@ function lunchFromDinner(m){ return m[2]==='Mittagessen' && /aufwärmen/.test(m[
 function isSplit(dinnerDate){ return !!(S.split&&S.split[iso(dinnerDate)]); }
 function lunchFresh(m,date){ return lunchFromDinner(m) && isSplit(addDays(date,-1)); }   // lunch cooked fresh as a single portion
 function toggleSplit(dinnerDate){ S.split=S.split||{}; const k=iso(dinnerDate); if(S.split[k]) delete S.split[k]; else S.split[k]=true; recomputeAll(); persist(); }
+function friHome(date){ return !!(S.friLunch&&S.friLunch[iso(date)]); }
+function toggleFri(friDate){ S.friLunch=S.friLunch||{}; const k=iso(friDate); if(S.friLunch[k]) delete S.friLunch[k]; else S.friLunch[k]=true; recomputeAll(); persist(); }
+function rowHint(m,date){
+  if(m[8]==='thu' && date && friHome(addDays(date,1))) return 'Doppelte Menge kochen, 2. Portion morgen 12 Uhr (Freitag frei)';
+  if(m[8]==='fri') return 'Reste von gestern aufwärmen (Freitag frei, kein Grillen)';
+  return m[5];
+}
 function rowSkipped(m,date){
   date=date||rowDate(m);
+  if(m[8]==='fri' && !friHome(date)) return 'off';
   if(isSkipped(date,m[2])) return 'self';
   if(lunchFromDinner(m) && isSkipped(addDays(date,-1),'Abendessen') && !isSplit(addDays(date,-1))) return 'dinner';
   return '';
@@ -429,7 +449,7 @@ function rowSkipped(m,date){
 function effPor(m,date){
   date=date||rowDate(m);
   if(rowSkipped(m,date)) return 0;
-  if(m[2]==='Abendessen'){ let p=m[6]||2; if(isSplit(date)) p=1; if(p>1 && isSkipped(addDays(date,1),'Mittagessen')) p-=1; return p; }
+  if(m[2]==='Abendessen'){ let p=m[6]||2; if(m[8]==='thu' && friHome(addDays(date,1))) p=2; if(isSplit(date)) p=1; if(p>1 && isSkipped(addDays(date,1),'Mittagessen')) p-=1; return p; }
   if(m[2]==='Mittagessen') return lunchFresh(m,date)?1:rowPor(m);
   return 1;
 }
@@ -456,7 +476,7 @@ function buildEP(){
     const w=p[0], di=DAYS.indexOf(p[1]), meal=p[2]; const row=p.slice(0,6); row[6]=null; row[7]=false;
     if(meal==='Abendessen'){
       const src=permOf(w,meal)[di]; const b=baseRow(w,src,meal);
-      row[4]=b[4]; row[6]= di===3?1:2; row[7]=src!==di;
+      row[4]=b[4]; row[6]= di===3?1:2; row[7]=src!==di; if(di===3) row[8]='thu';
       row[5]= di===3 ? 'Nur 1 Portion kochen (Freitagmittag entfällt)' : (di===6 ? p[5] : 'Doppelte Menge kochen, 2. Portion morgen 12 Uhr');
     } else if(meal==='Mittagessen' && di>=1 && /aufwärmen/.test(p[5]||'')){
       const b=baseRow(w,permOf(w,'Abendessen')[di-1],'Abendessen'); if(b) row[4]=b[4]; row[6]=2;
@@ -472,6 +492,8 @@ function buildEP(){
   });
   // meal times: warm lunch at 12:00, snack at 15:00
   out.forEach(r=>{ if(r[2]==='Frühsnack') r[3]='15:00'; else if(r[2]==='Mittagessen' && r[3]==='14:00') r[3]='12:00'; if(r[5]) r[5]=String(r[5]).replace('morgen 14 Uhr','morgen 12 Uhr'); });
+  // optional Friday lunch (holiday, no grilling): leftovers of Thursday's dinner
+  out.filter(r=>r[8]==='thu').forEach(r=>out.push([r[0],'Freitag','Mittagessen','12:00',r[4],'Reste von gestern aufwärmen',2,r[7],'fri']));
   EP=out; D.plan=out;
 }
 function mealName(meal){ return meal==='Frühsnack'?'Nachmittagssnack':meal; }
@@ -596,8 +618,8 @@ function mealCard(m, isNow, date){
   return `<div class="meal${isNow?' now':''}${done?' cooked':''}">
     <div class="time">${esc(m[3])}</div>
     <div class="card"><button class="cardbtn" data-dish="${esc(m[4])}" data-por="${mpor}"><div class="kind">${esc(mealName(m[2]))}${m[7]?' <span class="swaptag">getauscht</span>':''}</div><div class="name">${esc(d.n)}</div>
-    <div class="chips"><span class="chip">${fmt(d.kcal)} kcal</span><span class="chip p">${fmt(d.p)} g Protein</span>${fresh?`<span class="chip hint">Heute einzeln frisch kochen (1 Portion)</span>`:(m[2]==='Abendessen'&&isSplit(date)?`<span class="chip hint">Nur 1 Portion – morgen Mittag kochst du frisch</span>`:(m[5]?`<span class="chip hint">${esc(m[5])}</span>`:''))}${miss.length?`<span class="chip miss">Vorrat reicht nicht: ${esc(miss.map(([n,g])=>n+' (−'+fmtAmt(n,g)+')').join(', '))}</span>`:''}</div></button>
-    <div class="cookrow row" style="gap:8px">${act}${canSwap(m[2],DAYS.indexOf(m[1]))?`<button class="cookbtn ghostbtn" data-swap="${m[0]}|${DAYS.indexOf(m[1])}|${esc(m[2])}">⇄ Tauschen</button>`:''}${done?'':`<button class="cookbtn ghostbtn" data-skip="${esc(m[2])}">⊘ Diese Woche auslassen</button>`}${m[2]==='Abendessen'&&m[6]===2&&!done?`<button class="cookbtn ghostbtn" data-split="${iso(date)}">${isSplit(date)?'↺ Doch doppelt kochen':'½ Nur 1 Portion – morgen Mittag frisch'}</button>`:''}${fresh&&!done?`<button class="cookbtn ghostbtn" data-split="${iso(addDays(date,-1))}">↺ Doch Reste von gestern</button>`:''}</div>${m[2]==='Abendessen'&&mpor===1&&m[6]===2&&!isSplit(date)?'<div class="muted" style="font-size:.8rem;margin-top:6px">Nur 1 Portion kochen, das Mittagessen morgen ist ausgelassen.</div>':''}</div></div>`;
+    <div class="chips"><span class="chip">${fmt(d.kcal)} kcal</span><span class="chip p">${fmt(d.p)} g Protein</span>${fresh?`<span class="chip hint">Heute einzeln frisch kochen (1 Portion)</span>`:(m[2]==='Abendessen'&&isSplit(date)?`<span class="chip hint">Nur 1 Portion – morgen Mittag kochst du frisch</span>`:(rowHint(m,date)?`<span class="chip hint">${esc(rowHint(m,date))}</span>`:''))}${miss.length?`<span class="chip miss">Vorrat reicht nicht: ${esc(miss.map(([n,g])=>n+' (−'+fmtAmt(n,g)+')').join(', '))}</span>`:''}</div></button>
+    <div class="cookrow row" style="gap:8px">${act}${canSwap(m[2],DAYS.indexOf(m[1]))?`<button class="cookbtn ghostbtn" data-swap="${m[0]}|${DAYS.indexOf(m[1])}|${esc(m[2])}">⇄ Tauschen</button>`:''}${done?'':`<button class="cookbtn ghostbtn" data-skip="${esc(m[2])}">⊘ Diese Woche auslassen</button>`}${m[2]==='Abendessen'&&m[6]===2&&!done?`<button class="cookbtn ghostbtn" data-split="${iso(date)}">${isSplit(date)?'↺ Doch doppelt kochen':'½ Nur 1 Portion – morgen Mittag frisch'}</button>`:''}${fresh&&!done?`<button class="cookbtn ghostbtn" data-split="${iso(addDays(date,-1))}">↺ Doch Reste von gestern</button>`:''}${m[8]==='thu'&&!done&&!isSplit(date)?`<button class="cookbtn ghostbtn" data-fri="${iso(addDays(date,1))}">${friHome(addDays(date,1))?'↺ Freitag doch Grillen (1 Portion)':'Freitag frei? Doppelt kochen'}</button>`:''}${m[8]==='fri'?`<button class="cookbtn ghostbtn" data-fri="${iso(date)}">↺ Freitag doch Grillen</button>`:''}</div>${m[2]==='Abendessen'&&mpor===1&&m[6]===2&&!isSplit(date)?'<div class="muted" style="font-size:.8rem;margin-top:6px">Nur 1 Portion kochen, das Mittagessen morgen ist ausgelassen.</div>':''}</div></div>`;
 }
 
 function viewHeute(){
@@ -619,19 +641,20 @@ function viewHeute(){
   } else if(pos.before){
     h+=`<div class="panel prep" style="margin-bottom:14px">${pos.diff===-1?'<b>Morgen startet der Plan.</b> Heute Abend die Gefüllte Paprika doppelt kochen.':'Vor dem Planstart. Die Anzeige unten zeigt, was an diesem Wochentag im Zyklus liegt.'}</div>`;
   }
-  const ms=mealsFor(pos.week,dayName); const t=dayTotals(ms,date);
+  const ms=mealsFor(pos.week,dayName,date); const t=dayTotals(ms,date);
   h+=`<div class="totals"><div class="meter"><div class="eyebrow">Energie</div><b class="num">${fmt(t.kcal)}</b> <span class="muted">/ ${fmt(TARGET.kcal)} kcal</span><div class="bar"><i style="width:${Math.min(100,t.kcal/TARGET.kcal*100)}%"></i></div></div>
     <div class="meter"><div class="eyebrow">Protein</div><b class="num">${fmt(t.p)}</b> <span class="muted">/ ${TARGET.p} g</span><div class="bar p"><i style="width:${Math.min(100,t.p/TARGET.p*100)}%"></i></div></div></div>`;
+  if(pos.dow===4 && !pos.before && !friHome(date)) h+=`<div class="panel row" style="margin-bottom:12px;justify-content:space-between;gap:8px"><span>Heute frei und kein Grillen?</span><button class="cookbtn ghostbtn" data-fri="${iso(date)}">Mittagessen einplanen</button></div>`;
   h+=extrasPanel(date);
   const nowMin = offset===0 ? new Date().getHours()*60+new Date().getMinutes() : -1;
   let nowIdx=-1; if(nowMin>=0){ ms.forEach((m,i)=>{ const [hh,mm]=m[3].split(':').map(Number); if(nowMin>=hh*60+mm-90) nowIdx=i; }); }
   h+='<div class="timeline">'+ms.map((m,i)=>({time:m[3],html:mealCard(m,i===nowIdx,date)})).concat(fitItems(date)).sort((a,b)=>a.time.localeCompare(b.time)).map(x=>x.html).join('')+'</div>';
   // prep for tomorrow
-  const tpos=cyclePos(addDays(date,1)); const tms=mealsFor(tpos.week,DAYS[tpos.dow]);
+  const tpos=cyclePos(addDays(date,1)); const tms=mealsFor(tpos.week,DAYS[tpos.dow],addDays(date,1));
   const prep=tms.filter(m=>{const d=D.dishes[m[4]]; return (m[2]==='Frühstück'||m[2]==='Frühsnack') && d.va>0;});
   const dinner=ms.find(m=>m[2]==='Abendessen');
   h+=`<div class="panel prep" style="margin-top:6px"><div class="eyebrow">Heute Abend erledigen</div><ul>`;
-  if(dinner && dinner[5]) h+=`<li>${esc(D.dishes[dinner[4]].n)}: ${esc(dinner[5])}</li>`;
+  if(dinner && rowHint(dinner,date) && !rowSkipped(dinner,date)) h+=`<li>${esc(D.dishes[dinner[4]].n)}: ${esc(isSplit(date)?'Nur 1 Portion kochen':rowHint(dinner,date))}</li>`;
   prep.forEach(m=>{ const d=D.dishes[m[4]]; h+=`<li>Für morgen (${esc(mealName(m[2]))}): <button class="linkbtn" data-dish="${esc(m[4])}">${esc(d.n)}</button> <span class="muted num">· ca. ${d.va} Min.</span></li>`; });
   if(!prep.length) h+='<li class="muted">Für morgen früh ist nichts vorzubereiten.</li>';
   h+='</ul></div>';
@@ -646,6 +669,7 @@ function viewHeute(){
   document.querySelectorAll('[data-cook]').forEach(b=>b.onclick=()=>{ const m=ms.find(x=>x[2]===b.dataset.cook); if(m){ toggleCooked(date,m); keepScroll(render); } });
   document.querySelectorAll('[data-skip]').forEach(b=>b.onclick=()=>{ toggleSkip(date,b.dataset.skip); keepScroll(render); });
   document.querySelectorAll('[data-split]').forEach(b=>b.onclick=()=>{ toggleSplit(parseISO(b.dataset.split)); keepScroll(render); });
+  document.querySelectorAll('[data-fri]').forEach(b=>b.onclick=()=>{ toggleFri(parseISO(b.dataset.fri)); keepScroll(render); });
   const af=$('#addFood'); if(af) af.onclick=()=>openFoodPicker(date);
   document.querySelectorAll('[data-xq]').forEach(b=>b.onclick=()=>{ const l=S.eaten[iso(date)]; const e=l[+b.dataset.xq]; e.q=Math.round((e.q+parseFloat(b.dataset.d))*2)/2; if(e.q<=0) l.splice(+b.dataset.xq,1); persist(); keepScroll(render); });
 }
@@ -657,16 +681,17 @@ function viewWoche(){
   setHeader('4-Wochen-Plan', `Woche ${planWeek}`);
   let h=modeSeg()+weekSeg(planWeek,'pw')+`<div class="theme">${esc(THEMES[planWeek])}</div><div class="stack">`;
   DAYS.forEach((dn,i)=>{
-    const wdate=addDays(cycleBase(planWeek),(planWeek-1)*7+i); const ms=mealsFor(planWeek,dn); const t=dayTotals(ms,wdate);
+    const wdate=addDays(cycleBase(planWeek),(planWeek-1)*7+i); const ms=mealsFor(planWeek,dn,wdate); const t=dayTotals(ms,wdate);
     const isToday=!pos.before && pos.week===planWeek && pos.dow===i;
     h+=`<details class="day"${isToday?' open':''}><summary><span class="d">${dn}${isToday?' <span class="chip a">heute</span>':''}</span><span class="muted num">${fmt(t.kcal)} kcal · ${fmt(t.p)} g P</span></summary><div class="items">`+
-      ms.map(m=>{const d=D.dishes[m[4]]; const sk=rowSkipped(m,wdate); const por=(m[2]==='Abendessen'||m[2]==='Mittagessen')?(effPor(m,wdate)||rowPor(m)):1; const sw=canSwap(m[2],i)&&!sk; return `<div class="wrow${sk?' skipped':''}"><button class="wmeal" data-dish="${esc(m[4])}" data-por="${por}"><span class="t">${esc(m[3])}</span><span class="n"><span class="kind eyebrow">${esc(mealName(m[2]))}${m[7]?' <span class="swaptag">getauscht</span>':''}</span><br><b>${esc(d.n)}</b>${m[5]?`<br><span class="muted" style="font-size:.85rem">${esc(m[5])}</span>`:''}</span><span class="k">${fmt(d.kcal)} kcal<br>${fmt(d.p)} g P</span></button>${sw?`<button class="swapbtn" data-swap="${planWeek}|${i}|${esc(m[2])}" aria-label="${esc(m[2])} am ${dn} tauschen">⇄</button>`:'<span class="swapbtn off" title="fest"></span>'}${sk==='dinner'?'<span class="swapbtn off"></span>':`<button class="swapbtn skipbtn" data-wskip="${iso(wdate)}|${esc(m[2])}" aria-pressed="${!!sk}" aria-label="${esc(m[2])} am ${dn} ${sk?'wieder essen':'diese Woche auslassen'}">${sk?'↺':'⊘'}</button>`}</div>`;}).join('')+`</div></details>`;
+      ms.map(m=>{const d=D.dishes[m[4]]; const sk=rowSkipped(m,wdate); const por=(m[2]==='Abendessen'||m[2]==='Mittagessen')?(effPor(m,wdate)||rowPor(m)):1; const sw=canSwap(m[2],i)&&!sk; return `<div class="wrow${sk?' skipped':''}"><button class="wmeal" data-dish="${esc(m[4])}" data-por="${por}"><span class="t">${esc(m[3])}</span><span class="n"><span class="kind eyebrow">${esc(mealName(m[2]))}${m[7]?' <span class="swaptag">getauscht</span>':''}</span><br><b>${esc(d.n)}</b>${rowHint(m,wdate)?`<br><span class="muted" style="font-size:.85rem">${esc(rowHint(m,wdate))}</span>`:''}</span><span class="k">${fmt(d.kcal)} kcal<br>${fmt(d.p)} g P</span></button>${sw?`<button class="swapbtn" data-swap="${planWeek}|${i}|${esc(m[2])}" aria-label="${esc(m[2])} am ${dn} tauschen">⇄</button>`:'<span class="swapbtn off" title="fest"></span>'}${sk==='dinner'?'<span class="swapbtn off"></span>':`<button class="swapbtn skipbtn" data-wskip="${iso(wdate)}|${esc(m[2])}" aria-pressed="${!!sk}" aria-label="${esc(m[2])} am ${dn} ${sk?'wieder essen':'diese Woche auslassen'}">${sk?'↺':'⊘'}</button>`}</div>`;}).join('')+(i===4?`<div class="wrow"><button class="linkbtn" data-fri="${iso(wdate)}" style="padding:8px 4px">${friHome(wdate)?'↺ Freitag doch Grillen (Donnerstag 1 Portion)':'＋ Freitag frei: Donnerstag doppelt kochen, Reste zu Mittag'}</button></div>`:'')+`</div></details>`;
   });
   h+='</div>';
   h+=`<p class="muted" style="font-size:.85rem;margin-top:12px">Mit ⊘ lässt du ein Gericht nur in dieser Woche aus, seine Zutaten verschwinden dann aus der Einkaufsliste. Mit ⇄ tauschst du ein Gericht mit einem anderen Tag derselben Woche: Frühstück gegen Frühstück, Snack gegen Snack. Ein Abendessen nimmt sein Mittagessen am nächsten Tag mit, beim Sonntag das Montags-Mittagessen der nächsten Woche.</p>`;
   if(S.mealSwap&&S.mealSwap[planWeek]&&Object.keys(S.mealSwap[planWeek]).length) h+=`<div class="row"><button class="btn ghost" id="swapWeekReset">Alle Tausche in Woche ${planWeek} zurücksetzen</button></div>`;
   $('#view').innerHTML=h;
   document.querySelectorAll('[data-pw]').forEach(b=>b.onclick=()=>{planWeek=+b.dataset.pw;render();});
+  document.querySelectorAll('[data-fri]').forEach(b=>b.onclick=()=>{ toggleFri(parseISO(b.dataset.fri)); keepScroll(render); });
   document.querySelectorAll('[data-wskip]').forEach(bt=>bt.onclick=()=>{ const [ds,meal]=bt.dataset.wskip.split('|'); toggleSkip(parseISO(ds),meal); keepScroll(render); });
   const swr=$('#swapWeekReset'); if(swr) swr.onclick=()=>{ delete S.mealSwap[planWeek]; recomputeAll(); persist(); render(); };
   bindModeSeg();
@@ -1178,6 +1203,96 @@ $('#view').addEventListener('click',e=>{
   const u=e.target.closest('[data-unmove]'); if(u){ e.preventDefault(); if(S.moves) delete S.moves[u.dataset.unmove]; persist(); keepScroll(render); }
 });
 
+/* ---------- training history ---------- */
+let histEx=null; try{ histEx=localStorage.getItem(LS+'-hist'); }catch(e){}
+function exById(id){ for(const k in T.workouts){ const wo=T.workouts[k]; const x=wo.ex.find(z=>z.id===id); if(x) return {x,wo,k}; } return null; }
+function histList(){ const out=[]; ['push','pull','legs','core'].forEach(k=>{ const wo=T.workouts[k]; if(!wo) return; wo.ex.forEach(x=>{ if(x.kg || !wo.circuit) out.push({x,wo}); }); }); return out; }
+function exHist(id){
+  if(!S.fit) return [];
+  const today=iso(new Date()); const f=exById(id); const x=f&&f.x;
+  return Object.keys(S.fit).filter(k=>k<=today).sort().map(dk=>{
+    const e=S.fit[dk].ex&&S.fit[dk].ex[id]; if(!e) return null;
+    const reps=(e.reps||[]).filter(v=>v!=null&&v!=='').map(Number);
+    if(!e.done && !reps.length) return null;
+    const kg=(x&&x.kg&&e.kg!=null)?+e.kg:null;
+    return {dk, kg, reps, verdict:e.verdict, deload:fitPlan(parseISO(dk)).phase===4};
+  }).filter(Boolean);
+}
+function histVal(x,h){ return x.kg ? h.kg : (h.reps.length?h.reps.reduce((a,b)=>a+b,0):null); }
+function niceStep(range){ const raw=range/3; const p=Math.pow(10,Math.floor(Math.log10(raw||1))); for(const m of [1,2,2.5,5,10]) if(m*p>=raw) return m*p; return 10*p; }
+function histChart(x,hs){
+  const pts=hs.map(h=>({t:parseISO(h.dk).getTime(), y:histVal(x,h), dl:h.deload, dk:h.dk})).filter(p=>p.y!=null);
+  if(!pts.length) return '';
+  const W=340,H=180,L=38,R=14,TP=14,B=28, DAY=864e5;
+  let t0=pts[0].t, t1=pts[pts.length-1].t; if(t1-t0<7*DAY){ const m=(t0+t1)/2; t0=m-3.5*DAY; t1=m+3.5*DAY; } else { t0-=DAY; t1+=DAY; }
+  let y0=Math.min(...pts.map(p=>p.y)), y1=Math.max(...pts.map(p=>p.y));
+  const st=niceStep(Math.max(y1-y0, x.kg?4:6)); y0=Math.max(0,Math.floor((y0-st*0.3)/st)*st); y1=Math.ceil((y1+st*0.3)/st)*st; if(y1<=y0) y1=y0+st;
+  const X=t=>L+(t-t0)/(t1-t0)*(W-L-R), Y=v=>TP+(1-(v-y0)/(y1-y0))*(H-TP-B);
+  let g='';
+  // deload weeks shaded
+  const seen={}; pts.filter(p=>p.dl).forEach(p=>{ const d=parseISO(p.dk); const mon=addDays(d,-((d.getDay()+6)%7)); const k=iso(mon); if(seen[k]) return; seen[k]=1;
+    const a=Math.max(L,X(mon.getTime())), b=Math.min(W-R,X(mon.getTime()+7*DAY)); if(b>a) g+=`<rect x="${a.toFixed(1)}" y="${TP}" width="${(b-a).toFixed(1)}" height="${H-TP-B}" fill="var(--surface-2)"/>`; });
+  for(let v=y0; v<=y1+1e-9; v+=st){ const yy=Y(v).toFixed(1); g+=`<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" stroke="var(--line)" stroke-width="1"/><text x="${L-6}" y="${(+yy+4).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--muted)">${kgStr(v)}</text>`; }
+  // x labels: first, last, and Mondays in between if room
+  const lbls=[]; const sp=(t1-t0)/DAY; const stepD= sp<=21?7: sp<=60?14: 28;
+  let m=new Date(t0); m.setHours(0,0,0,0); m=addDays(m,(8-m.getDay())%7);
+  for(; m.getTime()<=t1; m=addDays(m,stepD)) lbls.push(m.getTime());
+  lbls.forEach(t=>{ const xx=X(t); if(xx<L+8||xx>W-R-8) return; g+=`<text x="${xx.toFixed(1)}" y="${H-8}" text-anchor="middle" font-size="11" fill="var(--muted)">${new Date(t).toLocaleDateString('de-DE',{day:'numeric',month:'numeric'})}</text>`; });
+  const path=pts.map((p,i)=>(i?'L':'M')+X(p.t).toFixed(1)+' '+Y(p.y).toFixed(1)).join(' ');
+  if(pts.length>1) g+=`<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+  pts.forEach(p=>{ g+= p.dl ? `<circle cx="${X(p.t).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="4.5" fill="var(--surface)" stroke="var(--muted)" stroke-width="2"/>` : `<circle cx="${X(p.t).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="4.5" fill="var(--accent)" stroke="var(--surface)" stroke-width="1.5"/>`; });
+  const lp=pts[pts.length-1]; const lx=X(lp.t), ly=Y(lp.y);
+  g+=`<text x="${Math.min(lx, W-R-2).toFixed(1)}" y="${(ly-10<TP+8?ly+20:ly-10).toFixed(1)}" text-anchor="end" font-size="12" font-weight="700" fill="var(--fg)" stroke="var(--surface)" stroke-width="4" paint-order="stroke">${kgStr(lp.y)}${x.kg?' kg':''}</text>`;
+  const desc=`${x.n}: ${pts.map(p=>p.dk+' '+kgStr(p.y)).join(', ')}`;
+  return `<svg class="histchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(desc)}">${g}</svg>`;
+}
+function sparkSvg(x,hs){
+  const v=hs.map(h=>histVal(x,h)).filter(y=>y!=null).slice(-6); if(v.length<2) return '';
+  const W=64,H=22,P=3; const a=Math.min(...v), b=Math.max(...v); const r=b-a||1;
+  const pt=v.map((y,i)=>[P+i*(W-2*P)/(v.length-1), b===a?H/2:P+(1-(y-a)/r)*(H-2*P)]);
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true"><polyline points="${pt.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${pt[pt.length-1][0].toFixed(1)}" cy="${pt[pt.length-1][1].toFixed(1)}" r="2.8" fill="var(--accent)"/></svg>`;
+}
+function histHtml(id){
+  const f=exById(id); if(!f) return '';
+  const x=f.x; const hs=exHist(id);
+  if(!hs.length) return `<div class="panel muted" style="margin-top:10px">Für ${esc(x.n)} ist noch nichts eingetragen. Sobald du im Training Gewicht und Wiederholungen einträgst, erscheint hier der Verlauf.</div>`;
+  const vals=hs.map(h=>histVal(x,h)).filter(v=>v!=null);
+  let sum='';
+  if(vals.length){ const a=vals[0], b=vals[vals.length-1]; const pct=a?Math.round((b-a)/a*100):0;
+    sum = x.kg ? `Start ${kgStr(a)} kg → jetzt ${kgStr(b)} kg${a&&b!==a?` (${pct>0?'+':''}${pct} %)`:''}` : `Start ${a} Wdh. → zuletzt ${b} Wdh. gesamt`; }
+  sum+=` · ${hs.length} Training${hs.length===1?'':'s'}`;
+  let h=`<div class="panel" style="margin-top:10px"><b class="num">${esc(sum)}</b>${(x.rmin||!x.kg)?`<div class="muted" style="font-size:.85rem">${[x.rmin?`Ziel: ${x.rmin}${x.rmax!==x.rmin?'–'+x.rmax:''} Wdh. pro Satz`:'', x.kg?'':'Diagramm zeigt alle Wiederholungen zusammen'].filter(Boolean).join(' · ')}</div>`:''}
+    ${histChart(x,hs)}<div class="histlegend muted"><span><i class="lg on"></i>Training</span><span><i class="lg dl"></i>Entlastungswoche</span></div></div>
+    <div class="muted" style="font-size:.82rem;margin-top:8px">Grün: oberes Ende geschafft · Orange: unter dem Ziel · „↑ mehr“: danach wurde das Gewicht erhöht</div>`;
+  h+=`<div class="list histtab${x.kg?'':' nokg'}" style="margin-top:10px">`+hs.slice().reverse().map(e=>{
+    const d=parseISO(e.dk); const k=e.verdict&&e.verdict.kind;
+    const badge= e.deload?'<span class="dchip" title="Entlastungswoche">Entl.</span>' : k==='up'?'<span class="dchip hup" title="danach gesteigert">↑ mehr</span>' : k==='down'?'<span class="dchip hdown" title="danach leichter">↓ leichter</span>':'';
+    const top=x.rmax&&e.reps.length&&!e.deload; 
+    const reps=e.reps.length? e.reps.map(r=>`<span class="${top&&r>=x.rmax?'rtop':top&&x.rmin&&r<x.rmin?'rlow':''}">${r}</span>`).join(' · ') : (e.verdict?'':'erledigt');
+    return `<div class="hrow"><div class="hd">${d.toLocaleDateString('de-DE',{weekday:'short'})} ${d.toLocaleDateString('de-DE',{day:'numeric',month:'numeric'})}</div>${x.kg?`<div class="hk num">${e.kg!=null?kgStr(e.kg)+' kg':'–'}</div>`:''}<div class="hr num">${reps}</div><div class="hb">${badge}</div></div>`;
+  }).join('')+'</div>';
+  return h;
+}
+function histSection(){
+  const list=histList(); if(!list.length) return '';
+  if(!histEx || !exById(histEx)){ // default: last trained exercise
+    let best=null, bd=''; list.forEach(({x})=>{ const hs=exHist(x.id); if(hs.length && hs[hs.length-1].dk>bd){ bd=hs[hs.length-1].dk; best=x.id; } }); histEx=best||list[0].x.id; }
+  const groups={}; list.forEach(({x,wo})=>{ (groups[wo.n]=groups[wo.n]||[]).push(x); });
+  const sel=`<select id="histSel" class="store" style="width:100%;margin-top:6px" aria-label="Übung für den Verlauf">${Object.entries(groups).map(([n,xs])=>`<optgroup label="${esc(n)}">${xs.map(x=>`<option value="${x.id}"${x.id===histEx?' selected':''}>${esc(x.n)}${exHist(x.id).length?'':' (noch leer)'}</option>`).join('')}</optgroup>`).join('')}</select>`;
+  return `<section class="group" style="margin-top:18px"><h3><span>Verlauf</span></h3>${sel}<div id="histBody">${histHtml(histEx)}</div></section>`;
+}
+function bindHist(){
+  const s=$('#histSel'); if(!s) return;
+  s.onchange=()=>{ histEx=s.value; try{localStorage.setItem(LS+'-hist',histEx)}catch(e){}; $('#histBody').innerHTML=histHtml(histEx); };
+}
+function openHist(id, backDk){
+  const f=exById(id); if(!f) return;
+  let h=sheetHead('Verlauf', f.x.n)+histHtml(id);
+  if(backDk) h+=`<div class="row" style="margin-top:14px"><button class="btn" id="histBack">Zurück zum Training</button></div>`;
+  sheetOpen(h); $('#sheetInner').scrollTop=0;
+  const b=$('#histBack'); if(b) b.onclick=()=>openWorkout(backDk);
+}
+
 function viewTraining(){
   const pos=cyclePos(new Date()); if(!planWeek) planWeek=pos.before?1:pos.week;
   const ph=T.phases[String(planWeek)];
@@ -1197,11 +1312,11 @@ function viewTraining(){
       if(away) extra=`<div class="muted" style="font-size:.88rem">${esc(T.workouts[away.wkey].n)} verschoben auf ${esc(shortDay(away.to))}</div>`;
       if(skip) extra=`<div class="muted" style="font-size:.88rem">${esc(T.workouts[skip.wkey].n)} fällt aus · <button class="linkbtn" data-unmove="${skip.origin}">doch trainieren</button></div>`;
       const r=fitGet(dk);
-      h+=`<div class="day dayfit rest"><button class="cardbtn" data-stretch="${dk}" style="flex:1;min-width:0">${dlabel}<b>Ruhetag</b><div class="muted" style="font-size:.88rem">${esc(T.stretch.rest.n)}, ca. ${T.stretch.rest.dur} Min.${i===4?' · Freitag wird mittags gegrillt':''}</div></button>${extra?`<div style="flex-basis:100%">${extra}</div>`:''}${r.stretch?'<span class="chip a">✓</span>':''}</div>`;
+      h+=`<div class="day dayfit rest"><button class="cardbtn" data-stretch="${dk}" style="flex:1;min-width:0">${dlabel}<b>Ruhetag</b><div class="muted" style="font-size:.88rem">${esc(T.stretch.rest.n)}, ca. ${T.stretch.rest.dur} Min.</div></button>${extra?`<div style="flex-basis:100%">${extra}</div>`:''}${r.stretch?'<span class="chip a">✓</span>':''}</div>`;
     }
   });
-  h+='</div>';
-  $('#view').innerHTML=h; bindModeSeg();
+  h+='</div>'+histSection();
+  $('#view').innerHTML=h; bindModeSeg(); bindHist();
   document.querySelectorAll('[data-pw]').forEach(b=>b.onclick=()=>{planWeek=+b.dataset.pw;render();});
 }
 
@@ -1403,7 +1518,7 @@ function openWorkout(dk){
     return `<div class="exo${e.done?' done':''}"><div class="exhead"><button class="check" data-exdone="${x.id}" aria-pressed="${!!e.done}" aria-label="${esc(x.n)} erledigt"><span><svg viewBox="0 0 24 24" fill="none" stroke-width="3.5"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></button>
       <div style="min-width:0;flex:1"><div class="iname">${i+1}. ${esc(x.n)}</div><div class="mus">${esc(x.mus||'')}</div><div class="iamt">${dose}</div><div class="iamt">${esc(x.eq)}</div></div>
       ${x.kg?`<div class="sin col"><div class="row" style="gap:4px;flex-wrap:nowrap"><input type="number" inputmode="decimal" step="0.5" min="0" data-exkg="${x.id}" value="${kgVal!=null?kgVal:''}" placeholder="kg" aria-label="Gewicht ${esc(x.n)} in kg"><span>kg</span></div>${kgNote?`<span class="kgnote">${kgNote}</span>`:''}</div>`:''}</div>
-      ${x.kg&&last?`<div class="iamt" style="margin:2px 0 0 50px">Letztes Mal: ${kgStr(last.kg)} kg (${parseISO(last.date).toLocaleDateString('de-DE',{day:'numeric',month:'short'})})</div>`:(x.start!=null&&!S.prog?.[x.id]?`<div class="iamt" style="margin:2px 0 0 50px">Startvorschlag – beim ersten Mal anpassen, falls zu leicht oder zu schwer.</div>`:'')}
+      ${x.kg&&last?`<div class="iamt" style="margin:2px 0 0 50px">Letztes Mal: ${kgStr(last.kg)} kg (${parseISO(last.date).toLocaleDateString('de-DE',{day:'numeric',month:'short'})})${(()=>{ const sp=sparkSvg(x,exHist(x.id)); return sp?` <button class="sparkbtn" data-hist="${x.id}" aria-label="Verlauf ${esc(x.n)} anzeigen">${sp}<span>Verlauf</span></button>`:''; })()}</div>`:(x.start!=null&&!S.prog?.[x.id]?`<div class="iamt" style="margin:2px 0 0 50px">Startvorschlag – beim ersten Mal anpassen, falls zu leicht oder zu schwer.</div>`:'')}
       ${x.kg?plateHtml(x, sp.byEx[x.id]):''}
       ${sets}
       <details class="howto"><summary>So geht’s</summary><ol class="steps">${x.how.map(s=>`<li>${esc(s)}</li>`).join('')}</ol><div class="muted" style="font-size:.9rem">Tipp: ${esc(x.tip)}</div></details></div>`;
@@ -1429,6 +1544,7 @@ function openWorkout(dk){
     const nx=$('#sheetInner').querySelector(`[data-rep="${x.id}"][data-k="${+inp.dataset.k+1}"]`); if(nx) nx.focus(); });
   bindFitButtons(inner, ()=>{ openWorkout(dk); render(); });
   inner.querySelector('[data-openstretch]').onclick=()=>{ const real=(S.moves&&S.moves[dk]&&S.moves[dk].to)||dk; openStretch(real); };
+  inner.querySelectorAll('[data-hist]').forEach(b=>b.onclick=()=>openHist(b.dataset.hist, dk));
   const wm=inner.querySelector('#woMove'); if(wm) wm.onclick=()=>openMove(dk);
 }
 function openStretch(dk, key){
