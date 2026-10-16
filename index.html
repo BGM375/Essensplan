@@ -210,6 +210,9 @@ h2{font-family:var(--f-display);font-weight:600;font-size:1.15rem;margin:0}
 .hrow{display:grid;grid-template-columns:5rem 4.3rem 1fr auto;gap:6px;align-items:center;padding:10px 12px;border-top:1px solid var(--line);font-size:.92rem}
 .hrow:first-child{border-top:0}
 .nokg .hrow{grid-template-columns:5rem 1fr auto}
+.hrow.nokg{grid-template-columns:6.5rem 1fr auto}
+.hrow.wk{grid-template-columns:5rem 1fr auto auto}
+#kcalT,#wToday,#wDay{width:100px}
 .hrow .hd{color:var(--muted);white-space:nowrap} .hrow .hr{white-space:nowrap} .hrow .hk{font-weight:700}
 .rtop{color:var(--ok);font-weight:700} .rlow{color:var(--amber);font-weight:700}
 .dchip.hup{background:var(--accent-soft);color:var(--accent)} .dchip.hdown{background:var(--amber-soft);color:var(--amber)}
@@ -456,6 +459,113 @@ function effPor(m,date){
 function toggleSkip(date,meal){ S.skips=S.skips||{}; const k=skipKey(date,meal); if(S.skips[k]) delete S.skips[k]; else S.skips[k]=true; recomputeAll(); persist(); }
 
 function addDays(date,n){ const d=new Date(date); d.setDate(d.getDate()+n); return d; }
+/* ---------- calorie target: boost selected carb/fat ingredients in clean steps ---------- */
+const BASE_KCAL=2200;
+// per 100 g: kcal, protein, fat, carbs · step in g · kind (c = carbs first, f = fat second) · max extra in g per portion
+const FLEX={
+  'Haferflocken':[370,13.5,7,59,5,'c',60], 'Vollkornbrot':[220,7,1.5,40,5,'c',60], 'Knäckebrot (Vollkorn)':[350,10,2,65,5,'c',30],
+  'Vollkornreis (trocken)':[350,7.5,2.5,72,5,'c',60], 'Vollkornnudeln (trocken)':[350,13,2.5,64,5,'c',60], 'Reisnudeln (trocken)':[360,6,0.5,82,5,'c',50],
+  'Bulgur (trocken)':[350,12,1.5,69,5,'c',50], 'Couscous (trocken)':[360,12,2,70,5,'c',50], 'Rote Linsen (trocken)':[340,24,1.5,50,5,'c',40],
+  'Kartoffeln (festkochend)':[75,2,0.1,15,25,'c',250], 'Süßkartoffel':[86,1.6,0.1,20,25,'c',200], 'Honig':[310,0.4,0,76,5,'c',10],
+  'Walnüsse':[650,15,65,7,5,'f',20], 'Mandeln':[600,21,50,6,5,'f',20], 'Kürbiskerne':[560,30,46,5,5,'f',15], 'Erdnussmus':[610,25,50,13,5,'f',15],
+  'Tahin':[600,18,54,10,5,'f',10], 'Chiasamen':[490,17,31,8,5,'f',10],
+  'Olivenöl':[880,0,100,0,5,'f',5], 'Rapsöl':[880,0,100,0,5,'f',5], 'Sesam':[570,18,50,12,5,'f',10], 'Leinöl':[880,0,100,0,5,'f',5]
+};
+const KCAL_SHARE={'Frühstück':0.30,'Hauptgericht':0.25,'Frühsnack':0.10,'Abendsnack':0.10};   // Hauptgericht is eaten twice a day (lunch + dinner)
+const BASE_DISHES=JSON.parse(JSON.stringify(D.dishes));
+let kcalApplied=null;
+function kcalTarget(){ const v=+S.kcalTarget; return v>=BASE_KCAL && v<=4000 ? Math.round(v/50)*50 : BASE_KCAL; }
+function boostDish(d, budget){
+  const cand=d.ing.map(([n,g],i)=>({n,i,g0:g,f:FLEX[n]})).filter(c=>c.f);
+  if(!cand.length || budget<20) return;
+  cand.forEach(c=>{ c.g=c.g0; c.add=0; });
+  const stepTo=c=>{ const st=c.f[4]; return Math.floor(c.g/st+1e-9)*st+st; };   // next clean value (multiple of the step)
+  let left=budget, guard=0;
+  while(guard++<60){
+    let best=null, bs=1e9;
+    cand.forEach(c=>{ const ng=stepTo(c); const dk=(ng-c.g)*c.f[0]/100; if(ng-c.g0>c.f[6]+1e-9) return; if(dk>left+dk*0.5) return;
+      const score=(ng-c.g0)/Math.max(c.g0,10)+(c.f[5]==='f'?0.6:0); if(score<bs){ bs=score; best={c,ng,dk}; } });
+    if(!best) break;
+    const {c,ng,dk}=best; c.add+=ng-c.g; c.g=ng; left-=dk;
+  }
+  const boost=[];
+  cand.forEach(c=>{ if(c.add<=0) return; const x=c.add/100;
+    d.kcal+=c.f[0]*x; d.p+=c.f[1]*x; d.f+=c.f[2]*x; d.kh+=c.f[3]*x; d.ing[c.i]=[c.n,c.g]; boost.push([c.n,Math.round(c.add*10)/10]); });
+  if(boost.length){ d.kcal=Math.round(d.kcal); d.p=Math.round(d.p*10)/10; d.f=Math.round(d.f*10)/10; d.kh=Math.round(d.kh*10)/10; d.boost=boost; }
+}
+function applyKcalTarget(){
+  const tgt=kcalTarget(); TARGET.kcal=tgt; if(kcalApplied===tgt) return; kcalApplied=tgt;
+  const extra=tgt-BASE_KCAL;
+  Object.keys(BASE_DISHES).forEach(id=>{ const d=JSON.parse(JSON.stringify(BASE_DISHES[id])); if(extra>0) boostDish(d, extra*(KCAL_SHARE[d.m]||0.1)); D.dishes[id]=d; });
+}
+function planDayStats(){
+  const out=[];
+  for(let w=1;w<=4;w++) DAYS.forEach((dn,i)=>{ if(i===4) return; const t=dayTotals(mealsFor(w,dn)); out.push(t); });
+  const k=out.map(t=>t.kcal), p=out.map(t=>t.p);
+  const avg=a=>a.reduce((s,v)=>s+v,0)/a.length;
+  return {kcal:avg(k), min:Math.min(...k), max:Math.max(...k), p:avg(p)};
+}
+
+/* ---------- weight log ---------- */
+function wGet(dk){ return S.weights&&S.weights[dk]!=null ? +S.weights[dk] : null; }
+function wList(){ return Object.keys(S.weights||{}).filter(k=>S.weights[k]!=null).sort().map(k=>({dk:k,kg:+S.weights[k]})); }
+function wAvg7(dk){ const end=parseISO(dk); const vals=wList().filter(e=>{ const d=parseISO(e.dk); return d<=end && d>addDays(end,-7); }).map(e=>e.kg); return vals.length? vals.reduce((a,b)=>a+b,0)/vals.length : null; }
+function weekAvgs(){
+  const by={}; wList().forEach(e=>{ const d=parseISO(e.dk); const mon=iso(addDays(d,-((d.getDay()+6)%7))); (by[mon]=by[mon]||[]).push(e.kg); });
+  return Object.keys(by).sort().map(m=>({mon:m, avg:by[m].reduce((a,b)=>a+b,0)/by[m].length, n:by[m].length}));
+}
+function kg1(v){ return (Math.round(v*10)/10).toLocaleString('de-DE',{minimumFractionDigits:1,maximumFractionDigits:1}); }
+function weightChart(){
+  const L=wList(); if(L.length<2) return '';
+  const W=340,H=180,PL=38,PR=14,PT=14,PB=28, DAY=864e5;
+  let t0=parseISO(L[0].dk).getTime(), t1=parseISO(L[L.length-1].dk).getTime(); if(t1-t0<7*DAY){ t1=t0+7*DAY; }
+  const ys=L.map(e=>e.kg); let y0=Math.min(...ys), y1=Math.max(...ys); const st=niceStep(Math.max(y1-y0,2)); y0=Math.floor((y0-st*0.2)/st)*st; y1=Math.ceil((y1+st*0.2)/st)*st;
+  const X=t=>PL+(t-t0)/(t1-t0)*(W-PL-PR), Y=v=>PT+(1-(v-y0)/(y1-y0))*(H-PT-PB);
+  let g='';
+  for(let v=y0; v<=y1+1e-9; v+=st){ const yy=Y(v).toFixed(1); g+=`<line x1="${PL}" x2="${W-PR}" y1="${yy}" y2="${yy}" stroke="var(--line)"/><text x="${PL-6}" y="${(+yy+4).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--muted)">${kgStr(v)}</text>`; }
+  const sp=(t1-t0)/DAY, stepD= sp<=21?7: sp<=70?14: 28; let m=new Date(t0); m=addDays(m,(8-m.getDay())%7);
+  for(; m.getTime()<=t1; m=addDays(m,stepD)){ const xx=X(m.getTime()); if(xx<PL+8||xx>W-PR-8) continue; g+=`<text x="${xx.toFixed(1)}" y="${H-8}" text-anchor="middle" font-size="11" fill="var(--muted)">${m.toLocaleDateString('de-DE',{day:'numeric',month:'numeric'})}</text>`; }
+  L.forEach(e=>{ g+=`<circle cx="${X(parseISO(e.dk).getTime()).toFixed(1)}" cy="${Y(e.kg).toFixed(1)}" r="3" fill="var(--muted)" opacity=".55"/>`; });
+  const av=L.map(e=>({t:parseISO(e.dk).getTime(), v:wAvg7(e.dk)}));
+  g+=`<path d="${av.map((p,i)=>(i?'L':'M')+X(p.t).toFixed(1)+' '+Y(p.v).toFixed(1)).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+  const la=av[av.length-1]; g+=`<text x="${Math.min(X(la.t),W-PR-2).toFixed(1)}" y="${(Y(la.v)-10<PT+8?Y(la.v)+20:Y(la.v)-10).toFixed(1)}" text-anchor="end" font-size="12" font-weight="700" fill="var(--fg)" stroke="var(--surface)" stroke-width="4" paint-order="stroke">Ø ${kg1(la.v)} kg</text>`;
+  return `<svg class="histchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Gewichtsverlauf: ${esc(L.map(e=>e.dk+' '+kg1(e.kg)).join(', '))}">${g}</svg><div class="histlegend muted"><span><i class="lg" style="background:var(--muted);opacity:.55"></i>Messung</span><span><i class="lg on"></i>Ø 7 Tage</span></div>`;
+}
+function weightTrend(){
+  const wa=weekAvgs().filter(x=>x.n>=3); if(wa.length<2) return '';
+  const last=wa[wa.length-1], prev=wa[wa.length-2]; const d=last.avg-prev.avg;
+  const txt= d<-0.2 ? `Du nimmst noch ab: ${kg1(d)} kg zur Vorwoche.` : d>0.2 ? `Gewicht steigt: +${kg1(d)} kg zur Vorwoche.` : `Gewicht stabil (${d>=0?'+':''}${kg1(d)} kg zur Vorwoche).`;
+  return `<div class="verdict ${d<-0.2?'up':d>0.2?'down':''}" style="margin-top:10px">${esc(txt)}</div>`;
+}
+function weightPanel(){
+  const wa=weekAvgs().slice(-8).reverse();
+  const rows=wa.map((x,i)=>{ const pr=wa[i+1]; const d=pr?x.avg-pr.avg:null; const mon=parseISO(x.mon);
+    return `<div class="hrow wk"><div class="hd">ab ${mon.toLocaleDateString('de-DE',{day:'numeric',month:'numeric'})}</div><div class="hk num">Ø ${kg1(x.avg)} kg</div><div class="hr num muted">${x.n}×</div><div class="hb">${d==null?'':`<span class="dchip${d<-0.05?' hup':d>0.05?' hdown':''}">${d>0?'+':''}${kg1(d)}</span>`}</div></div>`; }).join('');
+  return `<div class="panel stack"><h2>Gewicht</h2><div class="muted">Am besten morgens nach dem Aufstehen wiegen. Einzelne Tage schwanken, aussagekräftig ist der Wochendurchschnitt.</div>
+    <div class="row" style="gap:8px;flex-wrap:nowrap"><div class="sin" style="flex:1"><input type="number" inputmode="decimal" step="0.1" min="30" max="250" id="wToday" value="${wGet(iso(new Date()))!=null?wGet(iso(new Date())):''}" placeholder="kg" aria-label="Gewicht heute in kg"><span>kg heute</span></div></div>
+    ${weightChart()}${weightTrend()}
+    ${rows?`<div class="list histtab">${rows}</div>`:'<div class="muted" style="font-size:.88rem">Noch keine Einträge.</div>'}
+    ${wList().length?`<details><summary class="linkbtn" style="cursor:pointer">Einzelne Einträge bearbeiten</summary><div class="list histtab" style="margin-top:8px">${wList().slice(-21).reverse().map(e=>`<div class="hrow nokg"><div class="hd">${parseISO(e.dk).toLocaleDateString('de-DE',{weekday:'short',day:'numeric',month:'numeric'})}</div><div class="hr num">${kg1(e.kg)} kg</div><div class="hb"><button class="linkbtn" data-wdel="${e.dk}">löschen</button></div></div>`).join('')}</div></details>`:''}</div>`;
+}
+function kcalPanel(){
+  const tgt=kcalTarget(); const st=planDayStats();
+  return `<div class="panel stack"><h2>Kalorienziel</h2>
+    <div class="row" style="gap:8px;flex-wrap:nowrap;align-items:center"><button class="iconbtn" data-kstep="-50" aria-label="50 kcal weniger" ${tgt<=BASE_KCAL?'disabled':''}>−</button>
+      <div class="sin" style="flex:1"><input type="number" inputmode="numeric" step="50" min="${BASE_KCAL}" max="4000" id="kcalT" value="${tgt}" aria-label="Kalorienziel pro Tag"><span>kcal pro Tag</span></div>
+      <button class="iconbtn" data-kstep="50" aria-label="50 kcal mehr">+</button></div>
+    <div class="muted num">Plan jetzt: Ø ${fmt(st.kcal)} kcal (${fmt(st.min)}–${fmt(st.max)}) · Ø ${fmt(st.p)} g Protein pro Tag <span style="font-size:.85rem">(ohne Freitag, da isst du mittags extern)</span></div>
+    <div class="muted" style="font-size:.88rem">${tgt>BASE_KCAL?`Für die ${fmt(tgt-BASE_KCAL)} kcal mehr bekommen Reis, Nudeln, Haferflocken, Brot, Kartoffeln, Nüsse und Öl mehr – immer in glatten Schritten (meist 5 g, Kartoffeln 25 g). Fleisch, Fisch, Quark und Gemüse bleiben gleich. Rezepte und Einkaufsliste passen sich sofort an.`:`${fmt(BASE_KCAL)} kcal ist der Grundplan zum Abnehmen.`}</div>
+    <div class="muted" style="font-size:.88rem">Tipp: am Zielgewicht in Schritten von 100–150 kcal erhöhen und jeweils 2 Wochen beim Gewicht schauen. Bleibt der Wochendurchschnitt stabil, passt der Wert.</div></div>`;
+}
+function bindKcalWeight(){
+  const set=v=>{ v=Math.max(BASE_KCAL,Math.min(4000,Math.round(v/50)*50)); if(v===BASE_KCAL) delete S.kcalTarget; else S.kcalTarget=v; recomputeAll(); persist(); keepScroll(render); };
+  const k=$('#kcalT'); if(k) k.onchange=()=>{ const v=parseInt(k.value,10); if(!isNaN(v)) set(v); };
+  document.querySelectorAll('[data-kstep]').forEach(b=>b.onclick=()=>set(kcalTarget()+(+b.dataset.kstep)));
+  const w=$('#wToday'); if(w) w.onchange=()=>{ saveWeight(iso(new Date()), w.value); keepScroll(render); };
+  document.querySelectorAll('[data-wdel]').forEach(b=>b.onclick=()=>{ delete S.weights[b.dataset.wdel]; persist(); keepScroll(render); });
+}
+function saveWeight(dk,raw){ S.weights=S.weights||{}; const v=parseFloat(String(raw).replace(',','.')); if(isNaN(v)||v<30||v>250) delete S.weights[dk]; else S.weights[dk]=Math.round(v*10)/10; persist(); }
+
 /* ---------- meal swaps within a week ---------- */
 const BASE_PLAN=D.plan.map(p=>p.slice());
 const SWAP_MEALS=['Frühstück','Frühsnack','Abendsnack','Abendessen'];
@@ -568,7 +678,7 @@ function autoArrange(w){
   return {before, after:sundayBadSet(w).size, swaps};
 }
 
-function recomputeAll(){ buildEP(); computeNeeds(); if(typeof rebuildOCC==='function') rebuildOCC(); }
+function recomputeAll(){ applyKcalTarget(); buildEP(); computeNeeds(); if(typeof rebuildOCC==='function') rebuildOCC(); }
 
 function storeSummary(id){
   const d=D.dishes[id]; const cnt={};
@@ -651,6 +761,7 @@ function viewHeute(){
   h+=`<div class="totals"><div class="meter"><div class="eyebrow">Energie</div><b class="num">${fmt(t.kcal)}</b> <span class="muted">/ ${fmt(TARGET.kcal)} kcal</span><div class="bar"><i style="width:${Math.min(100,t.kcal/TARGET.kcal*100)}%"></i></div></div>
     <div class="meter"><div class="eyebrow">Protein</div><b class="num">${fmt(t.p)}</b> <span class="muted">/ ${TARGET.p} g</span><div class="bar p"><i style="width:${Math.min(100,t.p/TARGET.p*100)}%"></i></div></div></div>`;
   if(pos.dow===4 && !pos.before && !friHome(date)) h+=`<div class="panel row" style="margin-bottom:12px;justify-content:space-between;gap:8px"><span>Heute frei und kein Grillen?</span><button class="cookbtn ghostbtn" data-fri="${iso(date)}">Mittagessen einplanen</button></div>`;
+  if(offset<=0){ const wv=wGet(iso(date)); const a=wAvg7(iso(date)); h+=`<div class="panel row wpanel" style="margin-bottom:12px;gap:8px;flex-wrap:nowrap;justify-content:space-between"><span>Gewicht${offset===0?' heute':''}</span><div class="sin" style="max-width:150px"><input type="number" inputmode="decimal" step="0.1" id="wDay" value="${wv!=null?wv:''}" placeholder="kg" aria-label="Gewicht in kg"><span>kg</span></div>${a!=null?`<span class="muted num" style="font-size:.85rem">Ø 7 T.: ${kg1(a)}</span>`:''}</div>`; }
   h+=extrasPanel(date);
   const nowMin = offset===0 ? new Date().getHours()*60+new Date().getMinutes() : -1;
   let nowIdx=-1; if(nowMin>=0){ ms.forEach((m,i)=>{ const [hh,mm]=m[3].split(':').map(Number); if(nowMin>=hh*60+mm-90) nowIdx=i; }); }
@@ -676,6 +787,7 @@ function viewHeute(){
   document.querySelectorAll('[data-skip]').forEach(b=>b.onclick=()=>{ toggleSkip(date,b.dataset.skip); keepScroll(render); });
   document.querySelectorAll('[data-split]').forEach(b=>b.onclick=()=>{ toggleSplit(parseISO(b.dataset.split)); keepScroll(render); });
   document.querySelectorAll('[data-fri]').forEach(b=>b.onclick=()=>{ toggleFri(parseISO(b.dataset.fri)); keepScroll(render); });
+  const wd=$('#wDay'); if(wd) wd.onchange=()=>{ saveWeight(iso(date), wd.value); keepScroll(render); };
   const af=$('#addFood'); if(af) af.onclick=()=>openFoodPicker(date);
   document.querySelectorAll('[data-xq]').forEach(b=>b.onclick=()=>{ const l=S.eaten[iso(date)]; const e=l[+b.dataset.xq]; e.q=Math.round((e.q+parseFloat(b.dataset.d))*2)/2; if(e.q<=0) l.splice(+b.dataset.xq,1); persist(); keepScroll(render); });
 }
@@ -944,7 +1056,7 @@ function invTable(key, list){
 function viewSetup(){
   setHeader('Einstellungen','Plan & Läden');
   const pos=cyclePos(new Date());
-  let h=`<div class="stack">
+  let h=`<div class="stack">${kcalPanel()}${weightPanel()}
    <div class="panel stack"><div class="field"><label for="start">Startmontag von Woche 1</label><input type="date" id="start" value="${esc(S.start)}"></div>
      <div class="muted" id="startInfo">${pos.before?`Der Plan startet in ${-pos.diff} Tag${-pos.diff===1?'':'en'}.`:`Heute ist Woche ${pos.week}, ${DAYS[pos.dow]}. Nach Woche 4 beginnt der Plan wieder bei Woche 1.`}</div>
      <div class="muted">Wähle einen Montag. Am Sonntag davor kochst du die Gefüllte Paprika doppelt.</div></div>
@@ -972,6 +1084,7 @@ function viewSetup(){
    <div class="panel"><h2>Speichern</h2><div class="muted" style="margin-top:6px">Haken, Läden und eigene Artikel speichert die App im Browser auf diesem Handy. Öffne die Datei deshalb immer im selben Browser (Chrome) und lösche die Browserdaten nicht, sonst sind die Haken weg. Der Plan selbst steckt komplett in der Datei und funktioniert auch ohne Internet.</div></div>
   </div>`;
   $('#view').innerHTML=h;
+  bindKcalWeight();
   $('#start').onchange=e=>{ if(!e.target.value) return; S.start=e.target.value; recomputeAll(); persist(); render(); };
   document.querySelectorAll('[data-up]').forEach(b=>b.onclick=()=>{const i=+b.dataset.up; [S.stores[i-1],S.stores[i]]=[S.stores[i],S.stores[i-1]]; persist(); render();});
   document.querySelectorAll('[data-down]').forEach(b=>b.onclick=()=>{const i=+b.dataset.down; [S.stores[i+1],S.stores[i]]=[S.stores[i],S.stores[i+1]]; persist(); render();});
@@ -1013,6 +1126,7 @@ function openDish(id, porArg){
   $('#sheetInner').innerHTML=`<div class="grab"></div><div class="row" style="justify-content:space-between;flex-wrap:nowrap;align-items:flex-start"><div style="min-width:0"><div class="eyebrow">${esc(d.m)} · Woche ${d.w}</div><h2>${esc(d.n)}</h2></div><button class="iconbtn" id="closeSheet" aria-label="Schließen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
     <div class="chips"><span class="chip">${meta[0]}</span><span class="chip p">${meta[1]}</span><span class="chip">${meta[2]}</span><span class="chip">${meta[3]}</span></div>
     <div class="chips">${times}</div>
+    ${d.boost?`<div class="panel prep" style="margin-top:10px;font-size:.9rem">An dein Kalorienziel (${fmt(kcalTarget())} kcal) angepasst: ${esc(d.boost.map(([n,g])=>'+'+fmtG(g)+' g '+n).join(', '))} pro Portion.</div>`:''}
     <h3 class="eyebrow" style="margin:18px 0 6px">Zutaten</h3>
     <table class="ing"><thead><tr><th>Zutat</th><th>pro Portion</th>${por>1?`<th>kochen (${por} Port.)</th>`:''}</tr></thead><tbody>
     ${d.ing.map(([n,g])=>{ const sp=spoon(n,g*por); return `<tr><td>${esc(n)}${sp&&por===1?` <span class="muted" style="font-size:.8rem">(${sp})</span>`:''}</td><td class="g">${fmtG(g)} g</td>${por>1?`<td class="g"><b>${fmtG(g*por)} g</b>${sp?`<br><span class="muted" style="font-size:.78rem;font-weight:400">${sp}</span>`:''}</td>`:''}</tr>`; }).join('')}</tbody></table>
