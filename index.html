@@ -203,6 +203,7 @@ h2{font-family:var(--f-display);font-weight:600;font-size:1.15rem;margin:0}
 .carrygrp .list{border-color:var(--tomato)}
 .subhead{font-size:.75rem;letter-spacing:.07em;text-transform:uppercase;font-weight:700;color:var(--muted);margin:10px 2px 5px}
 .group h3 + .subhead{margin-top:2px}
+.dchip.wcur{background:var(--accent);color:var(--accent-fg);font-weight:700}
 .histchart{width:100%;height:auto;display:block;margin-top:10px}
 .histlegend{display:flex;gap:14px;font-size:.8rem;margin-top:4px}
 .histlegend .lg{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
@@ -1239,7 +1240,7 @@ function viewVorrat(){
       const meta=[need>0?`Woche ${w} noch: ${fmtAmt(n,need)}`:(weekNeed(w,n)>0?`Woche ${w}: alles gekocht`:`in Woche ${w} nicht gebraucht`), pw?(pc?`${have!=null?'≈ '+fmt(have)+' g · ':''}1 ${pcName(n)} ≈ ${fmt(pw)} g`:unitHint(n)):''].filter(Boolean).join(' · ');
       const val= have==null?'': (pc? r1(have/pw) : (have<10?r1(have):Math.round(have)));
       const tog= pw?`<div class="useg" role="group" aria-label="Einheit für ${esc(n)}"><button data-unit="${esc(n)}" data-u="g" aria-pressed="${!pc}">g</button><button data-unit="${esc(n)}" data-u="pc" aria-pressed="${pc}">${esc(pcName(n))}</button></div>`:'';
-      return `<div class="sitem"><div style="min-width:0"><div class="iname">${esc(n)}</div><div class="meta"><span class="iamt">${esc(meta)}</span>${st}</div></div>
+      return `<div class="sitem"><div style="min-width:0"><div class="iname">${esc(n)}</div><div class="meta"><span class="iamt">${esc(meta)}</span>${st}</div>${(()=>{ const wk=[1,2,3,4].map(x=>[x,weekNeed(x,n)]).filter(([,g])=>g>0); return wk.length?`<div class="days" aria-label="Bedarf pro Woche">${wk.map(([x,g])=>`<span class="dchip${x===w?' wcur':''}">${x}: <small>${esc(fmtAmt(n,g))}</small></span>`).join('')}</div>`:''; })()}</div>
         <div class="sin"><input type="number" inputmode="decimal" min="0" step="${pc?'0.5':'any'}" data-stock="${esc(n)}" value="${val}" placeholder="–" aria-label="Bestand ${esc(n)} in ${pc?esc(pcName(n)):'Gramm'}">${tog||'<span>g</span>'}</div></div>`;
     }).join('')+'</div>';
   });
