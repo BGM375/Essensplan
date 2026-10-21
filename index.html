@@ -884,7 +884,7 @@ function nextTripItems(T){
     m.forEach(n=>{ if(n.extra) return; n.amt=amtStr(n.name,n.g)+(n.gB>0.05&&n.gB<n.g-0.05?` · davon ${fmtG(g2(n.gB))}\u00a0g für Di–Do`:''); });
     main=m; }
   const carry=[]; const byName={};
-  all.filter(it=>ORD[it.trip]<ORD[T.r] && !it.extra && !isDone(T.w,it) && !isHome(T.w,it) && stillNeeded(T.w,it.name)).forEach(it=>{
+  all.filter(it=>ORD[it.trip]<ORD[T.r] && !it.extra && !stockHas(it.name) && !isDone(T.w,it) && !isHome(T.w,it) && stillNeeded(T.w,it.name)).forEach(it=>{
     const c=byName[it.name];
     if(c){ c.also.push(it.key); c.g=g2(c.g+it.g); c.amt=amtStr(it.name,c.g); }
     else { const n=Object.assign({},it,{carry:true,also:[]}); n.amt=amtStr(it.name,it.g); byName[it.name]=n; carry.push(n); }
@@ -893,7 +893,7 @@ function nextTripItems(T){
   // stock was lowered by hand (or used up): whatever it no longer covers goes onto the very next trip
   const first=upcomingTrips()[0];
   if(first && first.w===T.w && first.r===T.r){
-    const short=stockShort(T.w); const day=iso(new Date());
+    const short=stockShort(T); const day=iso(new Date());
     Object.keys(short).forEach(n=>{ const g=short[n];
       const it=carry.concat(main).find(x=>x.name===n && !x.extra && !isDone(T.w,x) && !isHome(T.w,x));
       if(it){ it.g=g2(it.g+g); it.amt=amtStr(n,it.g)+` · inkl. ${fmtG(g)}\u00a0g, die im Vorrat fehlen`; it.short=true; return; }
@@ -1201,10 +1201,10 @@ function needFrom(w,n,from){
   return s;
 }
 /* what the stock no longer covers this week, after everything still on the shopping lists */
-function stockShort(listW){
+function stockShort(T){ const listW=T.w, ORD={r1:0,r2:1,r3:2};
   const now=new Date(); const pos=cyclePos(now); if(pos.before) return {};
   const cw=pos.week; const open={};
-  if(listW===cw) tripItems(cw).forEach(it=>{ if(it.extra||isDone(cw,it)||isHome(cw,it)) return; open[it.name]=(open[it.name]||0)+it.g; });
+  if(listW===cw) tripItems(cw).forEach(it=>{ if(ORD[it.trip]<ORD[T.r]) return; if(it.extra||isDone(cw,it)||isHome(cw,it)) return; open[it.name]=(open[it.name]||0)+it.g; });
   const out={};
   Object.keys(S.stock||{}).forEach(n=>{ if(!D.nut[n] && !(D.need[cw]&&D.need[cw][n])) return;
     const need=needFrom(cw,n,now); if(need<=0) return; const miss=need-(S.stock[n]||0)-(open[n]||0);
