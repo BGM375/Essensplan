@@ -205,6 +205,13 @@ h2{font-family:var(--f-display);font-weight:600;font-size:1.15rem;margin:0}
 .group h3 + .subhead{margin-top:2px}
 .buyin{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:.82rem;margin-top:4px;width:100%}
 .buyin input{width:80px;padding:4px 6px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--fg);font:inherit}
+.wrow.st-ok{background:color-mix(in srgb, var(--ok) 14%, transparent);box-shadow:inset 4px 0 0 var(--ok)}
+.wrow.st-part{background:var(--amber-soft);box-shadow:inset 4px 0 0 var(--amber)}
+.wrow.st-none{background:var(--tomato-soft);box-shadow:inset 4px 0 0 var(--tomato)}
+.stlegend{display:flex;gap:14px;font-size:.8rem;margin:6px 2px 8px;flex-wrap:wrap}
+.stlegend .sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.sw.ok{background:var(--ok)} .sw.part{background:var(--amber)} .sw.none{background:var(--tomato)}
+.dchip.stc-ok{background:color-mix(in srgb, var(--ok) 18%, transparent);color:var(--ok)} .dchip.stc-part{background:var(--amber-soft);color:var(--amber)} .dchip.stc-none{background:var(--tomato-soft);color:var(--tomato)}
 .dchip.leftc{background:var(--amber-soft);color:var(--amber)}
 .dchip.wcur{background:var(--accent);color:var(--accent-fg);font-weight:700}
 .histchart{width:100%;height:auto;display:block;margin-top:10px}
@@ -698,10 +705,11 @@ function openSwap(w,di,meal){
   let h=sheetHead(`${mealName(meal)} · Woche ${w} · ${DAYS[di]}`, 'Gericht tauschen');
   h+=`<div class="panel" style="margin-top:8px"><div class="eyebrow">Jetzt</div><b>${esc(cd.n)}</b><div class="muted num" style="font-size:.88rem">${fmt(cd.kcal)} kcal · ${fmt(cd.p)} g Protein</div><div class="days" style="margin-top:6px">${storeSummary(cur[4])}</div></div>
     <p class="muted" style="margin:10px 0 6px">Tausche mit einem anderen Tag dieser Woche. ${meal==='Abendessen'?'Die 2. Portion für das Mittagessen am nächsten Tag tauscht automatisch mit, beim Sonntag ist das der Montag der nächsten Woche.':meal==='Abendsnack'?'':'Unter der Woche wird nur mit anderen Werktagen getauscht, damit es morgens schnell bleibt.'} Die Zahlen zeigen, wie viele Zutaten welchem Laden zugeordnet sind.</p><div class="stack">`;
+  const STM=stockStatusMap(); const wb=addDays(cycleBase(w),(w-1)*7);
   group.forEach(o=>{
-    const row=EP.find(p=>p[0]===w&&p[1]===DAYS[o]&&p[2]===meal); const d=D.dishes[row[4]];
+    const row=EP.find(p=>p[0]===w&&p[1]===DAYS[o]&&p[2]===meal); const d=D.dishes[row[4]]; const stc=STM[iso(addDays(wb,o))+'|'+meal];
     const note=[]; if(meal==='Abendessen'&&(o===3||di===3)) note.push(o===3?'Do: wird nur 1 Portion gekocht':'kommt auf Do: nur 1 Portion');
-    h+=`<button class="day dayfit pick" data-swapto="${o}"><div style="min-width:0"><div class="d">${DAYS[o]}</div><b>${esc(d.n)}</b><div class="muted num" style="font-size:.85rem">${fmt(d.kcal)} kcal · ${fmt(d.p)} g Protein${row[5]&&meal!=='Abendessen'?' · '+esc(row[5]):''}${note.length?' · '+esc(note.join(', ')):''}</div><div class="days" style="margin-top:6px">${storeSummary(row[4])}</div></div></button>`;
+    h+=`<button class="day dayfit pick" data-swapto="${o}"><div style="min-width:0"><div class="d">${DAYS[o]}</div><b>${esc(d.n)}</b><div class="muted num" style="font-size:.85rem">${fmt(d.kcal)} kcal · ${fmt(d.p)} g Protein${row[5]&&meal!=='Abendessen'?' · '+esc(row[5]):''}${note.length?' · '+esc(note.join(', ')):''}</div><div class="days" style="margin-top:6px">${stc?`<span class="dchip stc-${stc}">${ST_LBL[stc]}</span>`:''}${storeSummary(row[4])}</div></div></button>`;
   });
   h+='</div>';
   if(S.mealSwap&&S.mealSwap[w]&&S.mealSwap[w][meal]) h+=`<div class="row" style="margin-top:12px"><button class="btn ghost" id="swapReset">${esc(meal)} in Woche ${w} zurücksetzen</button></div>`;
@@ -798,15 +806,35 @@ function viewHeute(){
 
 function weekSeg(cur, id){ return `<div class="seg" role="group" aria-label="Woche wählen">${[1,2,3,4].map(w=>`<button data-${id}="${w}" aria-pressed="${w===cur}">Woche ${w}</button>`).join('')}</div>`; }
 
+/* which planned meals the stock covers (stock is handed out meal by meal in time order) */
+function stockStatusMap(){
+  const out={}; if(!S.stock||!Object.keys(S.stock).length) return out;
+  const now=new Date(); const left=Object.assign({},S.stock); const list=[];
+  EP.forEach(m=>{ const d=D.dishes[m[4]]; if(!d||isExternal(m)) return; if(lunchFromDinner(m)) return;
+    const date=rowDate(m); const t=new Date(date); t.setHours(parseInt(m[3],10)||12); if(t<now && iso(date)!==iso(now)) return;
+    if(rowSkipped(m,date) || (S.cooked&&S.cooked[cookKey(date,m[2])])) return;
+    const por=(m[2]==='Abendessen'||/Start-Gericht/.test(m[5]||''))?effPor(m,date):1; list.push({m,date,t,d,por}); });
+  list.sort((a,b)=>a.t-b.t);
+  list.forEach(({m,date,d,por})=>{ let n=0, full=0, some=0;
+    d.ing.forEach(([name,g])=>{ const nu=D.nut[name]; if(nu&&nu[0]==='Gewürze & Basics') return; n++;
+      const need=g*por, have=left[name]||0; if(have+0.5>=need) full++; else if(have>0.5) some++; left[name]=Math.max(0,have-need); });
+    // the lunch of the next day comes from this dinner: same status
+    const st= !n?'' : full===n?'ok' : (full||some)?'part':'none';
+    out[iso(date)+'|'+m[2]]=st;
+    if(m[2]==='Abendessen') out[iso(addDays(date,1))+'|Mittagessen']=out[iso(addDays(date,1))+'|Mittagessen']||st; });
+  return out;
+}
+const ST_LBL={ok:'alles im Vorrat',part:'teilweise im Vorrat',none:'nichts im Vorrat'};
 function viewWoche(){
   const pos=cyclePos(new Date()); if(!planWeek) planWeek=pos.before?1:pos.week;
   setHeader('4-Wochen-Plan', `Woche ${planWeek}`);
-  let h=modeSeg()+weekSeg(planWeek,'pw')+`<div class="theme">${esc(THEMES[planWeek])}</div><div class="stack">`;
+  const STM=stockStatusMap(); const hasSt=Object.keys(STM).length>0;
+  let h=modeSeg()+weekSeg(planWeek,'pw')+`<div class="theme">${esc(THEMES[planWeek])}</div>${hasSt?`<div class="stlegend muted"><span><i class="sw ok"></i>alles im Vorrat</span><span><i class="sw part"></i>teilweise</span><span><i class="sw none"></i>fehlt</span></div>`:''}<div class="stack">`;
   DAYS.forEach((dn,i)=>{
     const wdate=addDays(cycleBase(planWeek),(planWeek-1)*7+i); const ms=mealsFor(planWeek,dn,wdate); const t=dayTotals(ms,wdate);
     const isToday=!pos.before && pos.week===planWeek && pos.dow===i;
     h+=`<details class="day"${isToday?' open':''}><summary><span class="d">${dn}${isToday?' <span class="chip a">heute</span>':''}</span><span class="muted num">${fmt(t.kcal)} kcal · ${fmt(t.p)} g P</span></summary><div class="items">`+
-      ms.map(m=>{const d=D.dishes[m[4]]; const sk=rowSkipped(m,wdate); const por=(m[2]==='Abendessen'||m[2]==='Mittagessen')?(effPor(m,wdate)||rowPor(m)):1; const sw=canSwap(m[2],i)&&!sk; return `<div class="wrow${sk?' skipped':''}"><button class="wmeal" data-dish="${esc(m[4])}" data-por="${por}"><span class="t">${esc(m[3])}</span><span class="n"><span class="kind eyebrow">${esc(mealName(m[2]))}${m[7]?' <span class="swaptag">getauscht</span>':''}</span><br><b>${esc(d.n)}</b>${rowHint(m,wdate)?`<br><span class="muted" style="font-size:.85rem">${esc(rowHint(m,wdate))}</span>`:''}</span><span class="k">${fmt(d.kcal)} kcal<br>${fmt(d.p)} g P</span></button>${sw?`<button class="swapbtn" data-swap="${planWeek}|${i}|${esc(m[2])}" aria-label="${esc(m[2])} am ${dn} tauschen">⇄</button>`:'<span class="swapbtn off" title="fest"></span>'}${sk==='dinner'?'<span class="swapbtn off"></span>':`<button class="swapbtn skipbtn" data-wskip="${iso(wdate)}|${esc(m[2])}" aria-pressed="${!!sk}" aria-label="${esc(m[2])} am ${dn} ${sk?'wieder essen':'diese Woche auslassen'}">${sk?'↺':'⊘'}</button>`}</div>`;}).join('')+(i===4?`<div class="wrow"><button class="linkbtn" data-fri="${iso(wdate)}" style="padding:8px 4px">${friHome(wdate)?'↺ Freitag doch Grillen (Donnerstag 1 Portion)':'＋ Freitag frei: Donnerstag doppelt kochen, Reste zu Mittag'}</button></div>`:'')+`</div></details>`;
+      ms.map(m=>{const d=D.dishes[m[4]]; const sk=rowSkipped(m,wdate); const por=(m[2]==='Abendessen'||m[2]==='Mittagessen')?(effPor(m,wdate)||rowPor(m)):1; const sw=canSwap(m[2],i)&&!sk; const stc=STM[iso(wdate)+'|'+m[2]]; return `<div class="wrow${sk?' skipped':''}${stc&&!sk?' st-'+stc:''}"${stc&&!sk?` title="${ST_LBL[stc]}"`:''}><button class="wmeal" data-dish="${esc(m[4])}" data-por="${por}"><span class="t">${esc(m[3])}</span><span class="n"><span class="kind eyebrow">${esc(mealName(m[2]))}${m[7]?' <span class="swaptag">getauscht</span>':''}</span><br><b>${esc(d.n)}</b>${rowHint(m,wdate)?`<br><span class="muted" style="font-size:.85rem">${esc(rowHint(m,wdate))}</span>`:''}</span><span class="k">${fmt(d.kcal)} kcal<br>${fmt(d.p)} g P</span></button>${sw?`<button class="swapbtn" data-swap="${planWeek}|${i}|${esc(m[2])}" aria-label="${esc(m[2])} am ${dn} tauschen">⇄</button>`:'<span class="swapbtn off" title="fest"></span>'}${sk==='dinner'?'<span class="swapbtn off"></span>':`<button class="swapbtn skipbtn" data-wskip="${iso(wdate)}|${esc(m[2])}" aria-pressed="${!!sk}" aria-label="${esc(m[2])} am ${dn} ${sk?'wieder essen':'diese Woche auslassen'}">${sk?'↺':'⊘'}</button>`}</div>`;}).join('')+(i===4?`<div class="wrow"><button class="linkbtn" data-fri="${iso(wdate)}" style="padding:8px 4px">${friHome(wdate)?'↺ Freitag doch Grillen (Donnerstag 1 Portion)':'＋ Freitag frei: Donnerstag doppelt kochen, Reste zu Mittag'}</button></div>`:'')+`</div></details>`;
   });
   h+='</div>';
   h+=`<p class="muted" style="font-size:.85rem;margin-top:12px">Mit ⊘ lässt du ein Gericht nur in dieser Woche aus, seine Zutaten verschwinden dann aus der Einkaufsliste. Mit ⇄ tauschst du ein Gericht mit einem anderen Tag derselben Woche: Frühstück gegen Frühstück, Snack gegen Snack. Ein Abendessen nimmt sein Mittagessen am nächsten Tag mit, beim Sonntag das Montags-Mittagessen der nächsten Woche.</p>`;
@@ -853,7 +881,7 @@ function occMon(w){ return iso(addDays(cycleBase(w),(w-1)*7)); }
 function ensureOcc(w){
   // checks belong to one occurrence of a plan week; when the 4-week cycle comes round again they start fresh
   if(!S.occ){ S.occ={}; for(let x=1;x<=4;x++) S.occ[x]=occMon(x); saveLocal(); return; }
-  const m=occMon(w); if(S.occ[w]!==m){ ['checks','home','homeOff','bought'].forEach(f=>{ if(S[f]) S[f][w]={}; }); S.occ[w]=m; saveLocal(); }
+  const m=occMon(w); if(S.occ[w]!==m){ ['checks','home','homeOff','bought','buyAmt'].forEach(f=>{ if(S[f]) S[f][w]={}; }); S.occ[w]=m; saveLocal(); }
 }
 let nextTripIdx=0;
 function upcomingTrips(){
@@ -982,17 +1010,18 @@ function leftoverChip(w,it){
 }
 function buyField(w,it){
   if(!it||it.extra||it.spice) return '';
-  const b=S.bought&&S.bought[w]&&S.bought[w][it.key]; if(!b) return '';
-  const add=typeof b==='number'?b:b.add; const pc=unitOf(it.name)==='pc', pw=pcWeight(it.name);
+  if(S.autoStock===false || !it.g) return '';
+  const b=S.bought&&S.bought[w]&&S.bought[w][it.key]; const pre=S.buyAmt&&S.buyAmt[w]&&S.buyAmt[w][it.key];
+  const add= b ? (typeof b==='number'?b:b.add) : (pre!=null?pre:packGrams(it.name,it.g)); const pc=unitOf(it.name)==='pc', pw=pcWeight(it.name);
   const val= pc ? r1(add/pw) : Math.round(add);
-  return `<label class="buyin" title="Auf den echten Packungsinhalt ändern">Gekauft, ins Vorrat: <input type="number" inputmode="decimal" min="0" step="${pc?'0.5':'1'}" data-buy="${esc(it.key)}" value="${val}" aria-label="Gekaufte Menge ${esc(it.name)} in ${pc?esc(pcName(it.name)):'Gramm'}"> ${pc?esc(pcName(it.name)):'g'}</label>`;
+  return `<label class="buyin" title="Auf den echten Packungsinhalt ändern">${b?'Gekauft, ins Vorrat:':'Packung enthält:'} <input type="number" inputmode="decimal" min="0" step="${pc?'0.5':'1'}" data-buy="${esc(it.key)}" value="${val}" aria-label="Gekaufte Menge ${esc(it.name)} in ${pc?esc(pcName(it.name)):'Gramm'}"> ${pc?esc(pcName(it.name)):'g'}</label>`;
 }
 function itemRow(w,it){
   const st=storeOf(it); const dn=isDone(w,it); const hm=isHome(w,it);
   const opts=['<option value="">Laden wählen</option>'].concat(S.stores.map(s=>`<option${s===st?' selected':''}>${esc(s)}</option>`)).join('');
   const part=(!dn&&!hm&&!it.short&&!it.spice&&!it.extra&&stockHas(it.name)&&S.stock[it.name]>0.5)?Math.max(0,(it.trip==='r1'?it.g:Math.min(it.g,remainingNeed(w,it.name)))-S.stock[it.name]):0;
   return `<div class="item${dn?' done':''}${hm?' home':''}${part>0.5?' partial':''}"><button class="check" data-check="${esc(it.key)}" aria-label="${esc(it.name)} gekauft" aria-pressed="${dn}"><span><svg viewBox="0 0 24 24" fill="none" stroke-width="3.5"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span></button>
-    <div style="min-width:0"><div class="iname">${esc(it.name)}</div><div class="meta"><span class="iamt">${hm?('<b class="homelbl">'+(isHomeManual(w,it)?'zu Hause vorhanden':'Vorrat reicht · zu Hause')+'</b>'):esc(it.amt)}</span>${(!it.spice&&!it.extra&&stockHas(it.name))?(part>0.5?`<span class="iamt partlbl">· Vorrat ${fmtAmt(it.name,S.stock[it.name])} – noch kaufen: ${fmtAmt(it.name, unitOf(it.name)==='pc' ? Math.ceil(part/pcWeight(it.name)-1e-9)*pcWeight(it.name) : part)}</span>`:`<span class="iamt">· Vorrat ${fmtAmt(it.name,S.stock[it.name])}</span>`):''}${daysHtml(w,it)}${it.short?`<span class="dchip miss">Vorrat reicht nicht</span>`:(it.carry?`<span class="dchip miss">vergessen? noch gebraucht</span>`:'')}${leftoverChip(w,it)}${dn?buyField(w,it):''}${it.warn?`<span class="dchip miss">sonst ${esc(storeOf(it))} · bis Di gebraucht</span>`:''}<select class="store${st?'':' none'}" data-store="${esc(storeKey(it))}" aria-label="Laden für ${esc(it.name)}">${opts}</select></div></div>
+    <div style="min-width:0"><div class="iname">${esc(it.name)}</div><div class="meta"><span class="iamt">${hm?('<b class="homelbl">'+(isHomeManual(w,it)?'zu Hause vorhanden':'Vorrat reicht · zu Hause')+'</b>'):esc(it.amt)}</span>${(!it.spice&&!it.extra&&stockHas(it.name))?(part>0.5?`<span class="iamt partlbl">· Vorrat ${fmtAmt(it.name,S.stock[it.name])} – noch kaufen: ${fmtAmt(it.name, unitOf(it.name)==='pc' ? Math.ceil(part/pcWeight(it.name)-1e-9)*pcWeight(it.name) : part)}</span>`:`<span class="iamt">· Vorrat ${fmtAmt(it.name,S.stock[it.name])}</span>`):''}${daysHtml(w,it)}${it.short?`<span class="dchip miss">Vorrat reicht nicht</span>`:(it.carry?`<span class="dchip miss">vergessen? noch gebraucht</span>`:'')}${leftoverChip(w,it)}${(!hm||dn)?buyField(w,it):''}${it.warn?`<span class="dchip miss">sonst ${esc(storeOf(it))} · bis Di gebraucht</span>`:''}<select class="store${st?'':' none'}" data-store="${esc(storeKey(it))}" aria-label="Laden für ${esc(it.name)}">${opts}</select></div></div>
     <div class="side"><button class="homebtn" data-home="${esc(it.key)}" aria-pressed="${hm}" aria-label="${esc(it.name)}: ${hm?'doch einkaufen':'habe ich zu Hause'}" title="Habe ich zu Hause"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/><path d="M10 20v-5h4v5"/></svg></button>
     ${it.extra?`<button class="del" data-del="${esc(it.id)}" aria-label="${esc(it.name)} löschen">✕</button>`:''}</div></div>`;
 }
@@ -1070,8 +1099,9 @@ function viewEinkauf(){
   const aa=$('#autoArr'); if(aa) aa.onclick=()=>{ const r=autoArrange(w); persist(); autoMsg=r.swaps?`${r.swaps} Tausch${r.swaps>1?'e':''} in Woche ${w}: vorher ${r.before}, jetzt ${r.after} Artikel woanders.`:`Keine bessere Anordnung gefunden (${r.after} Artikel woanders). Ordne diese Zutaten ggf. ${sundayStore()} zu.`; keepScroll(render); };
   const aal=$('#autoArrAll'); if(aal) aal.onclick=()=>{ const parts=[1,2,3,4].map(x=>{ const r=autoArrange(x); return `W${x}: ${r.before}→${r.after}`; }); persist(); autoMsg='Artikel woanders vorher→nachher: '+parts.join(' · '); keepScroll(render); };
   const sb=$('#shopBk'); if(sb) sb.onchange=e=>importFromInput(e.target,'shopBkMsg');
-  document.querySelectorAll('[data-buy]').forEach(inp=>inp.onchange=()=>{ const k=inp.dataset.buy; const it=items.find(x=>x.key===k); const b=S.bought&&S.bought[w]&&S.bought[w][k]; if(!it||!b) return;
+  document.querySelectorAll('[data-buy]').forEach(inp=>inp.onchange=()=>{ const k=inp.dataset.buy; const it=items.find(x=>x.key===k); const b=S.bought&&S.bought[w]&&S.bought[w][k]; if(!it) return;
     let v=parseFloat(inp.value.replace(',','.')); if(isNaN(v)||v<0) return; if(unitOf(it.name)==='pc') v=v*pcWeight(it.name);
+    if(!b){ S.buyAmt=S.buyAmt||{}; S.buyAmt[w]=S.buyAmt[w]||{}; S.buyAmt[w][k]=v; persist(); return; }
     const old=typeof b==='number'?b:b.add; S.stock=S.stock||{}; S.stock[it.name]=Math.max(0,(S.stock[it.name]||0)+v-old);
     if(typeof b==='number') S.bought[w][k]={add:v,created:false}; else b.add=v; persist(); keepScroll(render); });
   document.querySelectorAll('[data-check]').forEach(b=>b.onclick=()=>{ const k=b.dataset.check; const it=items.find(x=>x.key===k); S.checks[w]=S.checks[w]||{}; const ks=[k].concat((it&&it.also)||[]); if(S.checks[w][k]){ ks.forEach(x=>delete S.checks[w][x]); if(it) removePurchase(w,it); } else { ks.forEach(x=>{ S.checks[w][x]=true; if(S.home&&S.home[w]) delete S.home[w][x]; }); if(it) addPurchase(w,it); } persist(); keepScroll(render); });
@@ -1242,7 +1272,7 @@ function toggleCooked(date,m){
 function addPurchase(w,it){
   if(S.autoStock===false || it.spice || it.extra || !it.g) return;
   S.stock=S.stock||{}; S.bought=S.bought||{}; S.bought[w]=S.bought[w]||{};
-  const add=packGrams(it.name,it.g); const created=!stockHas(it.name); S.stock[it.name]=(S.stock[it.name]||0)+add; S.bought[w][it.key]={add,created};
+  const pre=S.buyAmt&&S.buyAmt[w]&&S.buyAmt[w][it.key]; const add= pre!=null ? pre : packGrams(it.name,it.g); const created=!stockHas(it.name); S.stock[it.name]=(S.stock[it.name]||0)+add; S.bought[w][it.key]={add,created};
 }
 function removePurchase(w,it){
   const b=S.bought&&S.bought[w]&&S.bought[w][it.key]; if(!b) return;
