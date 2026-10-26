@@ -214,6 +214,12 @@ h2{font-family:var(--f-display);font-weight:600;font-size:1.15rem;margin:0}
 .dchip.stc-ok{background:color-mix(in srgb, var(--ok) 18%, transparent);color:var(--ok)} .dchip.stc-part{background:var(--amber-soft);color:var(--amber)} .dchip.stc-none{background:var(--tomato-soft);color:var(--tomato)}
 .sickpanel{background:var(--tomato-soft);border-color:transparent}
 .day.sickday{opacity:.85;background:var(--tomato-soft)}
+.dchip.opc{background:var(--accent-soft);color:var(--accent)} .dchip.fzc{background:#dceefa;color:#1f5f8b} .dchip.opbtn{background:none;border:1px dashed var(--line);color:var(--muted)}
+button.dchip{cursor:pointer;font-family:inherit;border:0;font-size:.75rem}
+.hrow.pp{grid-template-columns:5.2rem 3rem minmax(0,1fr) auto;gap:6px;padding:9px 10px}
+.hrow.pp .hr{white-space:normal;font-size:.86rem;min-width:0}
+.hrow.pp .hd{font-size:.86rem}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .dchip.fzc{background:#173247;color:#9fd0f2} }
 .dchip.leftc{background:var(--amber-soft);color:var(--amber)}
 .dchip.wcur{background:var(--accent);color:var(--accent-fg);font-weight:700}
 .histchart{width:100%;height:auto;display:block;margin-top:10px}
@@ -788,6 +794,7 @@ function viewHeute(){
   h+=`<div class="panel prep" style="margin-top:6px"><div class="eyebrow">Heute Abend erledigen</div><ul>`;
   if(dinner && rowHint(dinner,date) && !rowSkipped(dinner,date)) h+=`<li>${esc(D.dishes[dinner[4]].n)}: ${esc(isSplit(date)?'Nur 1 Portion kochen':rowHint(dinner,date))}</li>`;
   prep.forEach(m=>{ const d=D.dishes[m[4]]; h+=`<li>Für morgen (${esc(mealName(m[2]))}): <button class="linkbtn" data-dish="${esc(m[4])}">${esc(d.n)}</button> <span class="muted num">· ca. ${d.va} Min.</span></li>`; });
+  thawReminders(date).forEach(t=>{ h+=`<li>❄ ${esc(t)}</li>`; });
   if(!prep.length) h+='<li class="muted">Für morgen früh ist nichts vorzubereiten.</li>';
   h+='</ul></div>';
   if(pos.dow===5||pos.dow===6){ const nw=pos.week%4+1; h+=`<div class="panel" style="margin-top:12px"><div class="eyebrow">Einkauf</div><div style="margin-top:4px">Zeit für den Wocheneinkauf? <button class="linkbtn" id="goShop" data-week="${nw}">Liste für Woche ${nw} öffnen</button></div></div>`; }
@@ -1267,9 +1274,10 @@ function dishNeed(id,por){ const d=D.dishes[id]; por=por||d.por||1; return d.ing
 function missingFor(id,por){ return dishNeed(id,por).filter(([n,g])=>stockHas(n) && S.stock[n] < g - 0.5).map(([n,g])=>[n, g-S.stock[n]]); }
 function toggleCooked(date,m){
   S.cooked=S.cooked||{}; S.stock=S.stock||{};
-  const k=cookKey(date,m[2]);
+  const k=cookKey(date,m[2]); const wasCooked=!!S.cooked[k];
   if(S.cooked[k]){ const used=S.cooked[k].used||{}; Object.keys(used).forEach(n=>{ S.stock[n]=(S.stock[n]||0)+used[n]; }); delete S.cooked[k]; }
   else { const used={}; dishNeed(m[4], (m[2]==='Abendessen'||m[2]==='Mittagessen')?(effPor(m,date)||rowPor(m)):1).forEach(([n,g])=>{ if(!stockHas(n)) return; const before=S.stock[n]; const after=Math.max(0,before-g); used[n]=(used[n]||0)+(before-after); S.stock[n]=after; }); S.cooked[k]={id:m[4],used}; }
+  if(!wasCooked && S.cooked[k]) consumeOpened(date,m,S.cooked[k].used);
   persist();
 }
 function addPurchase(w,it){
@@ -1284,6 +1292,144 @@ function removePurchase(w,it){
 }
 
 let stockWeek=null, stockFilter='', stockOnlyHave=false, stockConfirm=false;
+/* ---------- opened packs, freezer portions, thaw reminders ---------- */
+// fridge: days an opened pack keeps · fz: freezer months (0 = not freezable) · tip: how to freeze / thaw
+const KEEP_INFO={
+  'Feta':{fridge:6,fz:3,tip:'In Salzlake in einer Dose. Gefroren: über Nacht im Kühlschrank auftauen, wird krümelig – für warme Gerichte, Wraps und Salat ideal.'},
+  'Mozzarella':{fridge:2,fz:2,tip:'Gut abtropfen, in Würfeln einfrieren. Nur noch zum Überbacken verwenden.'},
+  'Reibekäse (Gouda)':{fridge:6,fz:3,tip:'Beutel gut verschließen. Gefroren direkt zum Überbacken verwenden, kein Auftauen nötig.'},
+  'Parmesan':{fridge:28,fz:0,tip:'In Papier oder Dose, hält im Kühlschrank wochenlang.'},
+  'Hüttenkäse':{fridge:3,fz:0,tip:'Nicht einfrieren.'}, 'Skyr':{fridge:4,fz:0,tip:'Nicht einfrieren, abgedeckt kühl lagern.'}, 'Magerquark':{fridge:4,fz:0,tip:'Nicht einfrieren, abgedeckt kühl lagern.'},
+  'Milch 1,5 %':{fridge:3,fz:0,tip:'Geöffnet 3–4 Tage.'},
+  'Hähnchenbrust':{fridge:1,fz:4,tip:'Portionsweise flach in Beutel einfrieren. Über Nacht im Kühlschrank auftauen.'},
+  'Putenbrust':{fridge:1,fz:4,tip:'Portionsweise flach einfrieren, über Nacht im Kühlschrank auftauen.'},
+  'Putenhack':{fridge:1,fz:3,tip:'Flach im Beutel einfrieren, taut so schneller auf. Über Nacht im Kühlschrank auftauen.'},
+  'Rinderhack (mager)':{fridge:1,fz:3,tip:'Flach im Beutel einfrieren, über Nacht im Kühlschrank auftauen.'},
+  'Schweinefilet':{fridge:2,fz:4,tip:'In Medaillons geschnitten einfrieren, über Nacht im Kühlschrank auftauen.'},
+  'Rinderhüfte':{fridge:2,fz:4,tip:'In Streifen einfrieren, über Nacht im Kühlschrank auftauen.'},
+  'Lachsfilet':{fridge:1,fz:3,tip:'Einzeln verpackt einfrieren, über Nacht im Kühlschrank auftauen.'},
+  'Kabeljaufilet':{fridge:1,fz:3,tip:'Einzeln einfrieren, über Nacht im Kühlschrank auftauen.'}, 'Seelachsfilet':{fridge:1,fz:3,tip:'Einzeln einfrieren, über Nacht im Kühlschrank auftauen.'},
+  'Räucherlachs':{fridge:3,fz:2,tip:'Scheiben mit Folie getrennt einfrieren, im Kühlschrank auftauen.'}, 'Räucherforelle':{fridge:3,fz:2,tip:'Im Kühlschrank auftauen.'},
+  'Putenbrust-Aufschnitt':{fridge:3,fz:2,tip:'Scheiben portionsweise einfrieren, im Kühlschrank auftauen.'},
+  'Vollkornbrot':{fridge:5,fz:3,tip:'In Scheiben einfrieren, gefroren toasten oder 30 Min. auftauen lassen.'},
+  'Vollkorn-Tortilla':{fridge:5,fz:3,tip:'Mit Backpapier dazwischen einfrieren, 10 Min. auftauen.'},
+  'Blattspinat':{fridge:2,fz:6,tip:'Roh einfrieren, nur noch für warme Gerichte verwenden – gefroren in die Pfanne.'},
+  'Champignons':{fridge:3,fz:6,tip:'In Scheiben roh einfrieren, gefroren in die Pfanne.'},
+  'Brokkoli':{fridge:4,fz:6,tip:'In Röschen 2 Min. blanchieren, dann einfrieren. Gefroren garen.'},
+  'Paprika':{fridge:4,fz:6,tip:'In Streifen einfrieren, nur noch zum Braten und Kochen.'},
+  'Zucchini':{fridge:4,fz:4,tip:'In Würfeln einfrieren, nur noch zum Kochen.'},
+  'Kürbis (Hokkaido)':{fridge:5,fz:6,tip:'In Würfeln roh einfrieren, gefroren garen.'},
+  'Ingwer':{fridge:21,fz:6,tip:'Am Stück einfrieren und gefroren reiben.'},
+  'Frühlingszwiebeln':{fridge:5,fz:6,tip:'In Ringen einfrieren, gefroren verwenden.'},
+  'Pak Choi':{fridge:3,fz:0,tip:'Feucht eingewickelt lagern.'}, 'Gurke':{fridge:3,fz:0,tip:'Angeschnitten mit Folie abdecken.'},
+  'Avocado':{fridge:1,fz:0,tip:'Hälfte mit Kern und Zitronensaft abdecken.'}, 'Tomate':{fridge:4,fz:0,tip:''},
+  'Lauch':{fridge:5,fz:6,tip:'In Ringen einfrieren, gefroren verwenden.'}, 'Zitrone':{fridge:5,fz:0,tip:'Schnittfläche nach unten auf einen Teller.'}, 'Limette':{fridge:5,fz:0,tip:''},
+  'Dill (frisch)':{fridge:3,fz:6,tip:'Gehackt einfrieren, gefroren verwenden.'}, 'Petersilie (frisch)':{fridge:4,fz:6,tip:'Gehackt einfrieren, gefroren verwenden.'},
+  'Schnittlauch (frisch)':{fridge:3,fz:6,tip:'In Röllchen einfrieren, gefroren verwenden.'}, 'Kräuter (frisch, gemischt)':{fridge:3,fz:6,tip:'Gehackt einfrieren, gefroren verwenden.'},
+  'Tofu (natur)':{fridge:3,fz:3,tip:'In Wasser lagern. Gefroren wird er fester – gut zum Braten.'},
+  'Kokosmilch (light)':{fridge:4,fz:3,tip:'Rest in Eiswürfelform oder Dose einfrieren.'}, 'Passierte Tomaten':{fridge:4,fz:3,tip:'Rest in Dose einfrieren.'},
+  'Tomatenmark':{fridge:10,fz:3,tip:'Esslöffelweise einfrieren.'},
+  'Kichererbsen (Dose, abgetropft)':{fridge:3,fz:3,tip:'Abgetropft einfrieren.'}, 'Kidneybohnen (Dose, abgetropft)':{fridge:3,fz:3,tip:'Abgetropft einfrieren.'},
+  'Weiße Bohnen (Dose, abgetropft)':{fridge:3,fz:3,tip:'Abgetropft einfrieren.'}, 'Schwarze Bohnen (Dose, abgetropft)':{fridge:3,fz:3,tip:'Abgetropft einfrieren.'},
+  'Mais (Dose)':{fridge:3,fz:3,tip:'Abgetropft einfrieren.'}, 'Hummus':{fridge:5,fz:0,tip:''}, 'Sauerkraut':{fridge:7,fz:3,tip:''},
+  'Rote Currypaste':{fridge:30,fz:0,tip:''}, 'Banane':{fridge:3,fz:3,tip:'Geschält in Stücken einfrieren – für Oats und Pfannkuchen.'}
+};
+function keepInfo(n){ return KEEP_INFO[n] || null; }
+function frozenOf(n){ return (S.frozen&&S.frozen[n])||[]; }
+function frozenSum(n){ return frozenOf(n).reduce((s,p)=>s+p.g,0); }
+/* upcoming needs of one ingredient: [{date (iso, when it is needed), key: 'iso|meal', dish, g}] */
+function needsOf(name, days){
+  const now=new Date(); const today=iso(now); const lim=iso(addDays(now,days||35)); const out=[];
+  EP.forEach(m=>{ const d=D.dishes[m[4]]; if(!d||isExternal(m)||lunchFromDinner(m)) return; const ing=d.ing.find(x=>x[0]===name); if(!ing) return;
+    [0,28].forEach(off=>{ const date=addDays(rowDate(m),off); if(rowSkipped(m,date) || (S.cooked&&S.cooked[cookKey(date,m[2])])) return;
+    const prep= d.va>0 && ['Frühstück','Frühsnack','Abendsnack'].includes(m[2]); const nd= prep ? addDays(date,-1) : date; const ndk=iso(nd);
+    if(ndk<today || ndk>lim) return; if(ndk===today && !prep && (parseInt(m[3],10)||12) < now.getHours()-1) return;
+    const por=(m[2]==='Abendessen'||/Start-Gericht/.test(m[5]||''))?effPor(m,date):1;
+    out.push({date:ndk, mealDate:iso(date), key:iso(date)+'|'+m[2], dish:d.n, g:g2(ing[1]*por), prep}); }); });
+  return out.sort((a,b)=>a.date.localeCompare(b.date));
+}
+function portionPlan(name){
+  const o=S.opened&&S.opened[name]; if(!o) return null; const ki=keepInfo(name)||{fridge:3,fz:0,tip:''};
+  const until=iso(addDays(parseISO(o.date),ki.fridge)); const taken=new Set(frozenOf(name).map(p=>p.key));
+  let left=o.left; const rows=[];
+  needsOf(name).filter(x=>!taken.has(x.key)).forEach(x=>{ if(left<0.5) return; const g=Math.min(left,x.g); left-=g;
+    rows.push(Object.assign({},x,{g:g2(g), where: x.date<=until ? 'fridge' : (ki.fz ? 'freeze' : 'spoil'), short: g<x.g-0.5})); });
+  return {rows, rest:g2(Math.max(0,left)), until, ki};
+}
+function openOpened(name){
+  const nu=D.nut[name]; const o=S.opened&&S.opened[name]; const ki=keepInfo(name);
+  let h=sheetHead('Angebrochene Packung', name);
+  if(!o){
+    const have=stockHas(name)?S.stock[name]:0; const def=g2(nu&&nu[1] ? (have>0? Math.min(have, nu[1]) : nu[1]) : (have||100));
+    h+=`<p class="muted" style="margin-top:6px">Die App plant dann, was davon in den Kühlschrank kommt und was du für welchen Tag einfrierst.</p>
+      <div class="gearrow"><div class="field"><label for="opDate">Geöffnet am</label><input type="date" id="opDate" value="${esc(iso(new Date()))}"></div>
+      <div class="field"><label for="opLeft">Noch in der offenen Packung (g)</label><input type="number" inputmode="decimal" id="opLeft" min="0" value="${def}"></div></div>
+      <div class="row" style="margin-top:12px"><button class="btn" id="opSave">Portionsplan anzeigen</button></div>`;
+    sheetOpen(h);
+    $('#opSave').onclick=()=>{ const v=parseFloat($('#opLeft').value.replace(',','.')); if(isNaN(v)||v<=0) return; S.opened=S.opened||{}; S.opened[name]={date:$('#opDate').value||iso(new Date()), left:v}; persist(); openOpened(name); render(); };
+    return;
+  }
+  const pl=portionPlan(name); const fz=frozenOf(name);
+  h+=`<div class="muted" style="margin-top:6px">Offen seit ${esc(fmtD(o.date))} · im Kühlschrank ca. bis <b>${esc(fmtD(pl.until))}</b> · noch ${fmtG(g2(o.left))} g in der offenen Packung</div>`;
+  if(ki&&ki.tip) h+=`<div class="panel prep" style="margin-top:10px;font-size:.9rem">${esc(ki.tip)}</div>`;
+  const W={fridge:'Kühlschrank', freeze:'❄ einfrieren', spoil:'hält nicht so lange'};
+  if(pl.rows.length||pl.rest>0.5) h+=`<h3 class="eyebrow" style="margin:16px 0 6px">So aufteilen</h3><div class="list histtab">${pl.rows.map(r=>`<div class="hrow pp ${r.where}"><div class="hd">${esc(fmtD(r.date))}</div><div class="hk num">${fmtG(r.g)} g</div><div class="hr">${esc(r.dish)}${r.prep?' <span class="muted">(Vorabend)</span>':''}${r.short?' <span class="muted">· Rest reicht nicht ganz</span>':''}</div><div class="hb"><span class="dchip ${r.where==='fridge'?'':r.where==='freeze'?'fzc':'miss'}">${W[r.where]}</span></div></div>`).join('')}
+    ${pl.rest>0.5?`<div class="hrow pp"><div class="hd">Rest</div><div class="hk num">${fmtG(pl.rest)} g</div><div class="hr">nicht eingeplant</div><div class="hb"><span class="dchip ${pl.ki.fz?'fzc':''}">${pl.ki.fz?'❄ Reserve einfrieren':'bald aufbrauchen'}</span></div></div>`:''}</div>`;
+  else h+=`<div class="muted" style="margin-top:12px">In den nächsten Wochen nicht mehr eingeplant.</div>`;
+  if(pl.rows.some(r=>r.where==='spoil')) h+=`<div class="verdict down" style="margin-top:8px">Nicht einfrierbar und hält nicht bis zu diesen Terminen. Tausche das Gericht nach vorn oder kauf dann frisch.</div>`;
+  const toFreeze=pl.rows.filter(r=>r.where==='freeze');
+  h+=`<div class="row" style="margin-top:12px">${toFreeze.length||(pl.rest>0.5&&pl.ki.fz)?`<button class="btn" id="opFreeze">Eingefroren ✓ (${toFreeze.length+(pl.rest>0.5&&pl.ki.fz?1:0)} Portionen)</button>`:''}<button class="btn ghost" id="opDone">Packung leer / zurücksetzen</button></div>`;
+  if(fz.length) h+=`<h3 class="eyebrow" style="margin:18px 0 6px">Im Gefrierfach</h3><div class="list histtab">${fz.map((p,i)=>`<div class="hrow pp"><div class="hd">${p.date?esc(fmtD(p.date)):'Reserve'}</div><div class="hk num">${fmtG(p.g)} g</div><div class="hr">${esc(p.dish||'')}${p.date&&p.date<iso(new Date())?' <span class="muted">· Termin vorbei</span>':''}</div><div class="hb"><button class="linkbtn" data-fzdel="${i}">entnommen</button></div></div>`).join('')}</div>
+    <div class="row" style="margin-top:8px"><button class="btn ghost" id="fzReassign">Portionen neu zuordnen</button></div>`;
+  sheetOpen(h);
+  const fb=$('#opFreeze'); if(fb) fb.onclick=()=>{ S.frozen=S.frozen||{}; const list=S.frozen[name]=S.frozen[name]||[]; const today=iso(new Date());
+    toFreeze.forEach(r=>list.push({g:r.g, key:r.key, date:r.date, dish:r.dish, frozen:today})); if(pl.rest>0.5&&pl.ki.fz) list.push({g:pl.rest, key:null, date:null, dish:'Reserve', frozen:today});
+    o.left=Math.max(0,o.left-toFreeze.reduce((s,r)=>s+r.g,0)-(pl.rest>0.5&&pl.ki.fz?pl.rest:0)); if(o.left<0.5) delete S.opened[name]; persist(); render(); openFrozenOrOpened(name); };
+  $('#opDone').onclick=()=>{ delete S.opened[name]; persist(); closeSheet(); render(); };
+  bindFrozen(name);
+}
+function openFrozenOrOpened(name){ if(S.opened&&S.opened[name]) openOpened(name); else openFrozen(name); }
+function openFrozen(name){
+  const fz=frozenOf(name); let h=sheetHead('Gefrierfach', name);
+  const ki=keepInfo(name); if(ki&&ki.tip) h+=`<div class="panel prep" style="margin-top:10px;font-size:.9rem">${esc(ki.tip)}</div>`;
+  h+= fz.length? `<div class="list histtab" style="margin-top:10px">${fz.map((p,i)=>`<div class="hrow pp"><div class="hd">${p.date?esc(fmtD(p.date)):'Reserve'}</div><div class="hk num">${fmtG(p.g)} g</div><div class="hr">${esc(p.dish||'')}${p.date&&p.date<iso(new Date())?' <span class="muted">· Termin vorbei</span>':''}</div><div class="hb"><button class="linkbtn" data-fzdel="${i}">entnommen</button></div></div>`).join('')}</div>
+    <div class="row" style="margin-top:8px"><button class="btn ghost" id="fzReassign">Portionen neu zuordnen</button><button class="btn ghost" id="fzOpen">Neue Packung angebrochen</button></div>` : `<div class="muted" style="margin-top:10px">Nichts eingefroren.</div><div class="row" style="margin-top:8px"><button class="btn" id="fzOpen">Packung angebrochen</button></div>`;
+  sheetOpen(h); bindFrozen(name);
+  const op=$('#fzOpen'); if(op) op.onclick=()=>{ if(S.opened) delete S.opened[name]; openOpened(name); };
+}
+function bindFrozen(name){
+  const inner=$('#sheetInner');
+  inner.querySelectorAll('[data-fzdel]').forEach(b=>b.onclick=()=>{ S.frozen[name].splice(+b.dataset.fzdel,1); if(!S.frozen[name].length) delete S.frozen[name]; persist(); render(); openFrozenOrOpened(name); });
+  const ra=$('#fzReassign'); if(ra) ra.onclick=()=>{ reassignFrozen(name); persist(); render(); openFrozenOrOpened(name); };
+}
+function reassignFrozen(name){
+  // hand the frozen portions to the upcoming meals again (after swaps or skipped meals), biggest need first fits the closest portion
+  const list=frozenOf(name).slice().sort((a,b)=>a.g-b.g); const pool=list.slice(); const out=[];
+  const fridgeKeys=new Set((portionPlan(name)||{rows:[]}).rows.filter(r=>r.where==='fridge').map(r=>r.key));
+  needsOf(name).filter(n=>!fridgeKeys.has(n.key)).forEach(n=>{ if(!pool.length) return; let bi=pool.findIndex(p=>p.g+0.5>=n.g); if(bi<0) bi=pool.length-1; const p=pool.splice(bi,1)[0]; out.push(Object.assign({},p,{key:n.key,date:n.date,dish:n.dish})); });
+  pool.forEach(p=>out.push(Object.assign({},p,{key:null,date:null,dish:'Reserve'})));
+  S.frozen[name]=out;
+}
+/* when a meal is cooked: use up the matching frozen portion, otherwise take it from the opened pack */
+function consumeOpened(date,m,used){
+  const key=cookKey(date,m[2]); const d=D.dishes[m[4]]; if(!d) return;
+  d.ing.forEach(([n])=>{ const fz=frozenOf(n); const i=fz.findIndex(p=>p.key===key);
+    if(i>=0){ fz.splice(i,1); if(!fz.length) delete S.frozen[n]; return; }
+    const o=S.opened&&S.opened[n]; const g=used&&used[n]; if(o&&g){ o.left-=g; if(o.left<0.5) delete S.opened[n]; } });
+}
+function thawReminders(date){
+  const tm=iso(addDays(date,1)); const out=[];
+  Object.keys(S.frozen||{}).forEach(n=>frozenOf(n).forEach(p=>{ if(p.date===tm){ const ki=keepInfo(n); const direct=ki&&/gefroren (direkt|verwenden|in die Pfanne|garen|reiben|toasten)/.test(ki.tip); if(!direct) out.push(`${n} ${fmtG(p.g)} g aus dem Gefrierfach in den Kühlschrank (für ${p.dish} morgen)`); } }));
+  return out;
+}
+function stockOpenChips(n){
+  let s=''; const o=S.opened&&S.opened[n];
+  if(o){ const ki=keepInfo(n)||{fridge:3}; const until=iso(addDays(parseISO(o.date),ki.fridge)); const late=until<iso(new Date());
+    s+=`<button class="dchip ${late?'miss':'opc'}" data-opened="${esc(n)}">offen seit ${esc(fmtD(o.date))} · hält bis ${esc(fmtD(until))}</button>`; }
+  const fz=frozenOf(n); if(fz.length) s+=`<button class="dchip fzc" data-frozen="${esc(n)}">❄ ${fmtG(g2(frozenSum(n)))} g eingefroren (${fz.length} Port.)</button>`;
+  return s;
+}
+
 function viewVorrat(){
   const pos=cyclePos(new Date()); if(!stockWeek) stockWeek=pos.before?1:pos.week;
   const w=stockWeek; setHeader('Vorrat zu Hause','Bestände');
@@ -1310,7 +1456,7 @@ function viewVorrat(){
       const meta=[need>0?`Woche ${w} noch: ${fmtAmt(n,need)}`:(weekNeed(w,n)>0?`Woche ${w}: alles gekocht`:`in Woche ${w} nicht gebraucht`), pw?(pc?`${have!=null?'≈ '+fmt(have)+' g · ':''}1 ${pcName(n)} ≈ ${fmt(pw)} g`:unitHint(n)):''].filter(Boolean).join(' · ');
       const val= have==null?'': (pc? r1(have/pw) : (have<10?r1(have):Math.round(have)));
       const tog= pw?`<div class="useg" role="group" aria-label="Einheit für ${esc(n)}"><button data-unit="${esc(n)}" data-u="g" aria-pressed="${!pc}">g</button><button data-unit="${esc(n)}" data-u="pc" aria-pressed="${pc}">${esc(pcName(n))}</button></div>`:'';
-      return `<div class="sitem"><div style="min-width:0"><div class="iname">${esc(n)}</div><div class="meta"><span class="iamt">${esc(meta)}</span>${st}</div>${(()=>{ const wk=[1,2,3,4].map(x=>[x,weekNeed(x,n)]).filter(([,g])=>g>0); return wk.length?`<div class="days" aria-label="Bedarf pro Woche">${wk.map(([x,g])=>`<span class="dchip${x===w?' wcur':''}">${x}: <small>${esc(fmtAmt(n,g))}</small></span>`).join('')}</div>`:''; })()}</div>
+      return `<div class="sitem"><div style="min-width:0"><div class="iname">${esc(n)}</div><div class="meta"><span class="iamt">${esc(meta)}</span>${st}${stockOpenChips(n)}${(!(S.opened&&S.opened[n]) && have!=null && have>0 && keepInfo(n))?`<button class="dchip opbtn" data-opened="${esc(n)}">angebrochen?</button>`:''}</div>${(()=>{ const wk=[1,2,3,4].map(x=>[x,weekNeed(x,n)]).filter(([,g])=>g>0); return wk.length?`<div class="days" aria-label="Bedarf pro Woche">${wk.map(([x,g])=>`<span class="dchip${x===w?' wcur':''}">${x}: <small>${esc(fmtAmt(n,g))}</small></span>`).join('')}</div>`:''; })()}</div>
         <div class="sin"><input type="number" inputmode="decimal" min="0" step="${pc?'0.5':'any'}" data-stock="${esc(n)}" value="${val}" placeholder="–" aria-label="Bestand ${esc(n)} in ${pc?esc(pcName(n)):'Gramm'}">${tog||'<span>g</span>'}</div></div>`;
     }).join('')+'</div>';
   });
@@ -1321,6 +1467,8 @@ function viewVorrat(){
   $('#onlyHave').onclick=()=>{stockOnlyHave=!stockOnlyHave;render();};
   const si=$('#stockSearch'); si.oninput=()=>{ stockFilter=si.value; const pos=si.selectionStart; render(); const n=$('#stockSearch'); n.focus(); try{n.setSelectionRange(pos,pos);}catch(e){} };
   document.querySelectorAll('[data-stock]').forEach(inp=>inp.onchange=()=>{ const n=inp.dataset.stock; const v=inp.value.trim().replace(',','.'); S.stock=S.stock||{}; if(v==='') delete S.stock[n]; else { const x=parseFloat(v); if(!isNaN(x)&&x>=0) S.stock[n]= unitOf(n)==='pc' ? x*pcWeight(n) : x; } persist(); keepScroll(render); });
+  document.querySelectorAll('[data-opened]').forEach(b=>b.onclick=()=>openOpened(b.dataset.opened));
+  document.querySelectorAll('[data-frozen]').forEach(b=>b.onclick=()=>openFrozen(b.dataset.frozen));
   document.querySelectorAll('[data-unit]').forEach(b=>b.onclick=()=>{ S.stockUnit=S.stockUnit||{}; S.stockUnit[b.dataset.unit]=b.dataset.u; persist(); keepScroll(render); });
   const sc=$('#stockClear'); if(sc) sc.onclick=()=>{stockConfirm=true;keepScroll(render);};
   const sy=$('#stockClearYes'); if(sy) sy.onclick=()=>{S.stock={};S.bought={};stockConfirm=false;persist();render();};
