@@ -212,6 +212,8 @@ h2{font-family:var(--f-display);font-weight:600;font-size:1.15rem;margin:0}
 .stlegend .sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-1px}
 .sw.ok{background:var(--ok)} .sw.part{background:var(--amber)} .sw.none{background:var(--tomato)}
 .dchip.stc-ok{background:color-mix(in srgb, var(--ok) 18%, transparent);color:var(--ok)} .dchip.stc-part{background:var(--amber-soft);color:var(--amber)} .dchip.stc-none{background:var(--tomato-soft);color:var(--tomato)}
+.sickpanel{background:var(--tomato-soft);border-color:transparent}
+.day.sickday{opacity:.85;background:var(--tomato-soft)}
 .dchip.leftc{background:var(--amber-soft);color:var(--amber)}
 .dchip.wcur{background:var(--accent);color:var(--accent-fg);font-weight:700}
 .histchart{width:100%;height:auto;display:block;margin-top:10px}
@@ -532,7 +534,7 @@ function weightChart(){
   let t0=parseISO(L[0].dk).getTime(), t1=parseISO(L[L.length-1].dk).getTime(); if(t1-t0<7*DAY){ t1=t0+7*DAY; }
   const ys=L.map(e=>e.kg); let y0=Math.min(...ys), y1=Math.max(...ys); const st=niceStep(Math.max(y1-y0,2)); y0=Math.floor((y0-st*0.2)/st)*st; y1=Math.ceil((y1+st*0.2)/st)*st;
   const X=t=>PL+(t-t0)/(t1-t0)*(W-PL-PR), Y=v=>PT+(1-(v-y0)/(y1-y0))*(H-PT-PB);
-  let g='';
+  let g=sickBands(X,t0,t1,PL,PR,W,PT,H,PB);
   for(let v=y0; v<=y1+1e-9; v+=st){ const yy=Y(v).toFixed(1); g+=`<line x1="${PL}" x2="${W-PR}" y1="${yy}" y2="${yy}" stroke="var(--line)"/><text x="${PL-6}" y="${(+yy+4).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--muted)">${kgStr(v)}</text>`; }
   const sp=(t1-t0)/DAY, stepD= sp<=21?7: sp<=70?14: 28; let m=new Date(t0); m=addDays(m,(8-m.getDay())%7);
   for(; m.getTime()<=t1; m=addDays(m,stepD)){ const xx=X(m.getTime()); if(xx<PL+8||xx>W-PR-8) continue; g+=`<text x="${xx.toFixed(1)}" y="${H-8}" text-anchor="middle" font-size="11" fill="var(--muted)">${m.toLocaleDateString('de-DE',{day:'numeric',month:'numeric'})}</text>`; }
@@ -540,7 +542,7 @@ function weightChart(){
   const av=L.map(e=>({t:parseISO(e.dk).getTime(), v:wAvg7(e.dk)}));
   g+=`<path d="${av.map((p,i)=>(i?'L':'M')+X(p.t).toFixed(1)+' '+Y(p.v).toFixed(1)).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
   const la=av[av.length-1]; g+=`<text x="${Math.min(X(la.t),W-PR-2).toFixed(1)}" y="${(Y(la.v)-10<PT+8?Y(la.v)+20:Y(la.v)-10).toFixed(1)}" text-anchor="end" font-size="12" font-weight="700" fill="var(--fg)" stroke="var(--surface)" stroke-width="4" paint-order="stroke">Ø ${kg1(la.v)} kg</text>`;
-  return `<svg class="histchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Gewichtsverlauf: ${esc(L.map(e=>e.dk+' '+kg1(e.kg)).join(', '))}">${g}</svg><div class="histlegend muted"><span><i class="lg" style="background:var(--muted);opacity:.55"></i>Messung</span><span><i class="lg on"></i>Ø 7 Tage</span></div>`;
+  return `<svg class="histchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Gewichtsverlauf: ${esc(L.map(e=>e.dk+' '+kg1(e.kg)).join(', '))}">${g}</svg><div class="histlegend muted"><span><i class="lg" style="background:var(--muted);opacity:.55"></i>Messung</span><span><i class="lg on"></i>Ø 7 Tage</span>${(S.sick||[]).length?'<span><i class="lg" style="background:var(--tomato-soft);border-radius:2px"></i>krank</span>':''}</div>`;
 }
 function weightTrend(){
   const wa=weekAvgs().filter(x=>x.n>=3); if(wa.length<2) return '';
@@ -774,6 +776,7 @@ function viewHeute(){
     <div class="meter"><div class="eyebrow">Protein</div><b class="num">${fmt(t.p)}</b> <span class="muted">/ ${TARGET.p} g</span><div class="bar p"><i style="width:${Math.min(100,t.p/TARGET.p*100)}%"></i></div></div></div>`;
   if(pos.dow===4 && !pos.before && !friHome(date)) h+=`<div class="panel row" style="margin-bottom:12px;justify-content:space-between;gap:8px"><span>Heute frei und kein Grillen?</span><button class="cookbtn ghostbtn" data-fri="${iso(date)}">Mittagessen einplanen</button></div>`;
   if(offset<=0){ const wv=wGet(iso(date)); const a=wAvg7(iso(date)); h+=`<div class="panel row wpanel" style="margin-bottom:12px;gap:8px;flex-wrap:nowrap;justify-content:space-between"><span>Gewicht${offset===0?' heute':''}</span><div class="sin" style="max-width:150px"><input type="number" inputmode="decimal" step="0.1" id="wDay" value="${wv!=null?wv:''}" placeholder="kg" aria-label="Gewicht in kg"><span>kg</span></div>${a!=null?`<span class="muted num" style="font-size:.85rem">Ø 7 T.: ${kg1(a)}</span>`:''}</div>`; }
+  if(isSick(iso(date))) h+=`<div class="panel sickpanel" style="margin-bottom:12px"><b>Krank</b> · Training und Dehnen pausieren. ${sickOngoing()&&offset===0?'<button class="linkbtn" data-sickwell="1">Wieder fit</button>':''}</div>`;
   h+=extrasPanel(date);
   const nowMin = offset===0 ? new Date().getHours()*60+new Date().getMinutes() : -1;
   let nowIdx=-1; if(nowMin>=0){ ms.forEach((m,i)=>{ const [hh,mm]=m[3].split(':').map(Number); if(nowMin>=hh*60+mm-90) nowIdx=i; }); }
@@ -1358,13 +1361,18 @@ function shortDay(dk){ return parseISO(dk).toLocaleDateString('de-DE',{weekday:'
 function fitItems(date){
   const dk=iso(date); const out=[];
   const ss=sessionsOn(date);
+  if(isSick(dk)){
+    ss.forEach(s=>out.push({time:s.time, html:`<div class="meal fit gone"><div class="time">${s.time}</div><div class="card"><div class="kind fitk">Training · krank</div><div class="name muted">${esc(T.workouts[s.wkey].n)}</div><div class="muted" style="font-size:.85rem;margin-top:4px">Fällt aus und zählt nicht als verpasst. Gute Besserung!</div><div class="cookrow"><button class="cookbtn ghostbtn" data-sick="">Krank-Zeitraum ändern</button></div></div></div>`}));
+    out.push({time:STRETCH_TIME_REST, html:`<div class="meal fit gone"><div class="time">${STRETCH_TIME_REST}</div><div class="card"><div class="kind fitk">Dehnen · krank</div><div class="name muted">pausiert</div></div></div>`});
+    return out;
+  }
   ss.forEach(s=>{
     const wo=T.workouts[s.wkey]; const ph=T.phases[String(fitPlan(parseISO(s.origin)).phase)]; const r=fitGet(s.origin);
     const nEx=wo.ex.length, nDone=wo.ex.filter(x=>r.ex[x.id]&&r.ex[x.id].done).length;
     out.push({time:s.time, html:`<div class="meal fit${r.done?' cooked':''}"><div class="time">${s.time}</div><div class="card"><button class="cardbtn" data-workout="${s.origin}">
       <div class="kind fitk">Training · ${esc(ph.n)}</div><div class="name">${esc(wo.n)}</div>
       <div class="chips"><span class="chip">ca. ${wo.dur} Min.</span><span class="chip">${wo.circuit?wo.rounds[fitPlan(parseISO(s.origin)).phase-1]+' Runden Zirkel':nEx+' Übungen'}</span><span class="chip a">${esc(ph.rir)}</span>${s.from?`<span class="chip hint">verschoben von ${esc(shortDay(s.from))}</span>`:''}${nDone&&!r.done?`<span class="chip">${nDone}/${nEx} erledigt</span>`:''}</div></button>
-      <div class="cookrow row" style="gap:8px"><button class="cookbtn" data-fitdone="${s.origin}" aria-pressed="${!!r.done}">${r.done?'✓ Training erledigt · rückgängig':'Training erledigt'}</button>${r.done?'':`<button class="cookbtn ghostbtn" data-move="${s.origin}">Verschieben</button>`}</div></div></div>`});
+      <div class="cookrow row" style="gap:8px"><button class="cookbtn" data-fitdone="${s.origin}" aria-pressed="${!!r.done}">${r.done?'✓ Training erledigt · rückgängig':'Training erledigt'}</button>${r.done?'':`<button class="cookbtn ghostbtn" data-move="${s.origin}">Verschieben</button><button class="cookbtn ghostbtn" data-sick="${dk}">Krank</button>`}</div></div></div>`});
   });
   const away=movedAway(date), skip=skippedOn(date);
   if(away) out.push({time:FIT_TIME, html:`<div class="meal fit gone"><div class="time">${FIT_TIME}</div><div class="card"><div class="kind fitk">Training verschoben</div><div class="name muted">${esc(T.workouts[away.wkey].n)} → ${esc(shortDay(away.to))}</div><div class="cookrow"><button class="cookbtn ghostbtn" data-move="${away.origin}">Ändern</button></div></div></div>`});
@@ -1421,9 +1429,78 @@ function openMove(origin){
   const um=inner.querySelector('[data-unmove]'); if(um) um.onclick=()=>{ delete S.moves[origin]; persist(); closeSheet(); render(); };
 }
 $('#view').addEventListener('click',e=>{
+  const sk=e.target.closest('[data-sick]'); if(sk){ e.preventDefault(); openSick(sk.dataset.sick||undefined); return; }
+  const sw=e.target.closest('[data-sickwell]'); if(sw){ e.preventDefault(); const on=sickOngoing(); if(on){ const y=iso(addDays(new Date(),-1)); on.to=y<on.from?on.from:y; persist(); keepScroll(render); } return; }
   const m=e.target.closest('[data-move]'); if(m){ e.preventDefault(); openMove(m.dataset.move); return; }
   const u=e.target.closest('[data-unmove]'); if(u){ e.preventDefault(); if(S.moves) delete S.moves[u.dataset.unmove]; persist(); keepScroll(render); }
 });
+
+/* ---------- sick days ---------- */
+function todayIso(){ return iso(new Date()); }
+function sickEnd(p){ return p.to || todayIso(); }
+function isSick(dk){ return (S.sick||[]).some(p=>dk>=p.from && dk<=sickEnd(p)); }
+function sickOngoing(){ return (S.sick||[]).find(p=>!p.to); }
+function sickDaysBetween(a,b){ // sick days strictly after a and before b (iso strings)
+  let n=0; (S.sick||[]).forEach(p=>{ const s=p.from>a?p.from:iso(addDays(parseISO(a),1)); const e0=sickEnd(p); const e=e0<b?e0:iso(addDays(parseISO(b),-1)); if(e>=s) n+=Math.round((parseISO(e)-parseISO(s))/864e5)+1; }); return n; }
+function fmtD(dk){ return parseISO(dk).toLocaleDateString('de-DE',{weekday:'short',day:'numeric',month:'numeric'}); }
+function openSick(fromDk){
+  const on=sickOngoing();
+  let h=sheetHead('Training & Dehnen','Krank');
+  h+=`<p class="muted" style="margin-top:6px">In dem Zeitraum pausieren Training und Dehnen. Die Tage zählen nicht als verpasst, und beim ersten Training danach passt die App die Gewichte an.</p>
+    <div class="gearrow"><div class="field"><label for="sickFrom">Krank ab</label><input type="date" id="sickFrom" value="${esc(on?on.from:(fromDk||todayIso()))}"></div>
+    <div class="field"><label for="sickTo">bis einschließlich</label><input type="date" id="sickTo" value=""></div></div>
+    <div class="muted" style="font-size:.85rem">„bis“ leer lassen, wenn du noch nicht weißt, wie lange. Dann tippst du später auf „Wieder fit“.</div>
+    <div class="row" style="margin-top:12px"><button class="btn" id="sickSave">Speichern</button>${on?`<button class="btn ghost" id="sickWell">Wieder fit ab heute</button>`:''}</div>`;
+  const list=(S.sick||[]).map((p,i)=>({p,i})).sort((a,b)=>b.p.from.localeCompare(a.p.from));
+  if(list.length) h+=`<h3 class="eyebrow" style="margin:18px 0 6px">Bisher</h3><div class="list histtab">${list.map(({p,i})=>`<div class="hrow nokg"><div class="hd">${fmtD(p.from)}</div><div class="hr">bis ${p.to?fmtD(p.to):'heute (läuft)'}</div><div class="hb"><button class="linkbtn" data-sickdel="${i}">löschen</button></div></div>`).join('')}</div>`;
+  sheetOpen(h);
+  $('#sickSave').onclick=()=>{ const f=$('#sickFrom').value, t=$('#sickTo').value||null; if(!f) return; if(t && t<f) return;
+    S.sick=(S.sick||[]).filter(p=>!(on && p===on)); S.sick.push({from:f,to:t}); persist(); closeSheet(); keepScroll(render); };
+  const wl=$('#sickWell'); if(wl) wl.onclick=()=>{ const y=iso(addDays(new Date(),-1)); on.to= y<on.from?on.from:y; persist(); closeSheet(); keepScroll(render); };
+  $('#sheetInner').querySelectorAll('[data-sickdel]').forEach(b=>b.onclick=()=>{ S.sick.splice(+b.dataset.sickdel,1); persist(); openSick(); render(); });
+}
+function sickPanel(){
+  const on=sickOngoing(); const t=todayIso(); const p=(S.sick||[]).find(x=>t>=x.from && t<=sickEnd(x));
+  if(p) return `<div class="panel sickpanel row" style="justify-content:space-between;gap:8px;margin-top:10px"><span><b>Krank</b> seit ${esc(fmtD(p.from))}${p.to?' bis '+esc(fmtD(p.to)):''} · Training und Dehnen pausieren</span><span class="row" style="gap:6px">${on?'<button class="cookbtn" data-sickwell="1">Wieder fit</button>':''}<button class="cookbtn ghostbtn" data-sick="">Ändern</button></span></div>`;
+  return `<div class="row" style="margin-top:10px"><button class="cookbtn ghostbtn" data-sick="">🤒 Krank melden</button></div>`;
+}
+/* first training of an exercise after being sick: lighter, and does not lower the progression */
+function reentryInfo(dk,id){
+  if(!S.sick||!S.sick.length||!S.fit) return null;
+  const done=Object.keys(S.fit).filter(k=>k<dk && S.fit[k].ex && S.fit[k].ex[id] && (S.fit[k].ex[id].done || (S.fit[k].ex[id].reps||[]).some(v=>v!=null&&v!==''))).sort();
+  // look back over the last sick period before dk
+  const per=(S.sick||[]).filter(p=>p.from<dk).sort((a,b)=>b.from.localeCompare(a.from))[0]; if(!per) return null;
+  const end=sickEnd(per); if(end>=dk) return null;
+  const before=done.filter(k=>k<per.from); const last=before[before.length-1]; if(!last) return null;
+  const after=done.filter(k=>k>end);
+  const days=sickDaysBetween(last,dk); if(days<3) return null;
+  if(after.length>=2) return null;
+  let f=1;
+  if(days>14) f= after.length===0?0.8:0.9; else if(days>7) f= after.length===0?0.9:1;
+  if(after.length===1){ const v=S.fit[after[0]].ex[id].verdict; if(v && v.top) f=1; if(f===1) return null; }
+  return {f, days, first:after.length===0};
+}
+function fitStats(){
+  const start=S.start; const t=todayIso(); if(!start||start>t) return null;
+  let poss=0, done=0, sick=0, stPoss=0, stDone=0, sickDays=0;
+  for(let d=parseISO(start); iso(d)<=t; d=addDays(d,1)){
+    const dk=iso(d); const past=dk<t; const sk=isSick(dk); if(sk) sickDays++;
+    sessionsOn(d).forEach(s=>{ const r=fitGet(s.origin); if(sk){ sick++; return; } if(r.done){ poss++; done++; } else if(past) poss++; });
+    const skipped=skippedOn(d); if(skipped && !sk && past) poss++;
+    if(!sk){ const r=fitGet(dk); if(r.stretch){ stPoss++; stDone++; } else if(past) stPoss++; }
+  }
+  return {poss, done, sick, stPoss, stDone, sickDays};
+}
+function statsHtml(){
+  const s=fitStats(); if(!s || (!s.poss && !s.sickDays)) return '';
+  return `<div class="panel" style="margin-top:10px"><div class="eyebrow">Seit Planstart</div><div class="num" style="margin-top:4px"><b>${s.done} von ${s.poss}</b> möglichen Trainings · <b>${s.stDone} von ${s.stPoss}</b> Dehneinheiten${s.sickDays?` · <span style="color:var(--tomato)">${s.sickDays} Tag${s.sickDays===1?'':'e'} krank</span>`:''}</div><div class="muted" style="font-size:.85rem">Krankheitstage zählen nicht als verpasst.</div></div>`;
+}
+function sickBands(X,t0,t1,L,R,W,TP,H,B){
+  let g=''; const DAY=864e5;
+  (S.sick||[]).forEach(p=>{ const a=parseISO(p.from).getTime(), b=parseISO(sickEnd(p)).getTime()+DAY; if(b<t0||a>t1) return;
+    const x1=Math.max(L,X(a)), x2=Math.min(W-R,X(b)); if(x2>x1) g+=`<rect x="${x1.toFixed(1)}" y="${TP}" width="${(x2-x1).toFixed(1)}" height="${H-TP-B}" fill="var(--tomato-soft)"/>`; });
+  return g;
+}
 
 /* ---------- training history ---------- */
 let histEx=null; try{ histEx=localStorage.getItem(LS+'-hist'); }catch(e){}
@@ -1437,20 +1514,20 @@ function exHist(id){
     const reps=(e.reps||[]).filter(v=>v!=null&&v!=='').map(Number);
     if(!e.done && !reps.length) return null;
     const kg=(x&&x.kg&&e.kg!=null)?+e.kg:null;
-    return {dk, kg, reps, verdict:e.verdict, deload:fitPlan(parseISO(dk)).phase===4};
+    return {dk, kg, reps, verdict:e.verdict, deload:fitPlan(parseISO(dk)).phase===4, re:!!(e.verdict&&e.verdict.reentry)};
   }).filter(Boolean);
 }
 function histVal(x,h){ return x.kg ? h.kg : (h.reps.length?h.reps.reduce((a,b)=>a+b,0):null); }
 function niceStep(range){ const raw=range/3; const p=Math.pow(10,Math.floor(Math.log10(raw||1))); for(const m of [1,2,2.5,5,10]) if(m*p>=raw) return m*p; return 10*p; }
 function histChart(x,hs){
-  const pts=hs.map(h=>({t:parseISO(h.dk).getTime(), y:histVal(x,h), dl:h.deload, dk:h.dk})).filter(p=>p.y!=null);
+  const pts=hs.map(h=>({t:parseISO(h.dk).getTime(), y:histVal(x,h), dl:h.deload||h.re, dk:h.dk})).filter(p=>p.y!=null);
   if(!pts.length) return '';
   const W=340,H=180,L=38,R=14,TP=14,B=28, DAY=864e5;
   let t0=pts[0].t, t1=pts[pts.length-1].t; if(t1-t0<7*DAY){ const m=(t0+t1)/2; t0=m-3.5*DAY; t1=m+3.5*DAY; } else { t0-=DAY; t1+=DAY; }
   let y0=Math.min(...pts.map(p=>p.y)), y1=Math.max(...pts.map(p=>p.y));
   const st=niceStep(Math.max(y1-y0, x.kg?4:6)); y0=Math.max(0,Math.floor((y0-st*0.3)/st)*st); y1=Math.ceil((y1+st*0.3)/st)*st; if(y1<=y0) y1=y0+st;
   const X=t=>L+(t-t0)/(t1-t0)*(W-L-R), Y=v=>TP+(1-(v-y0)/(y1-y0))*(H-TP-B);
-  let g='';
+  let g=sickBands(X,t0,t1,L,R,W,TP,H,B);
   // deload weeks shaded
   const seen={}; pts.filter(p=>p.dl).forEach(p=>{ const d=parseISO(p.dk); const mon=addDays(d,-((d.getDay()+6)%7)); const k=iso(mon); if(seen[k]) return; seen[k]=1;
     const a=Math.max(L,X(mon.getTime())), b=Math.min(W-R,X(mon.getTime()+7*DAY)); if(b>a) g+=`<rect x="${a.toFixed(1)}" y="${TP}" width="${(b-a).toFixed(1)}" height="${H-TP-B}" fill="var(--surface-2)"/>`; });
@@ -1484,11 +1561,11 @@ function histHtml(id){
     sum = x.kg ? `Start ${kgStr(a)} kg → jetzt ${kgStr(b)} kg${a&&b!==a?` (${pct>0?'+':''}${pct} %)`:''}` : `Start ${a} Wdh. → zuletzt ${b} Wdh. gesamt`; }
   sum+=` · ${hs.length} Training${hs.length===1?'':'s'}`;
   let h=`<div class="panel" style="margin-top:10px"><b class="num">${esc(sum)}</b>${(x.rmin||!x.kg)?`<div class="muted" style="font-size:.85rem">${[x.rmin?`Ziel: ${x.rmin}${x.rmax!==x.rmin?'–'+x.rmax:''} Wdh. pro Satz`:'', x.kg?'':'Diagramm zeigt alle Wiederholungen zusammen'].filter(Boolean).join(' · ')}</div>`:''}
-    ${histChart(x,hs)}<div class="histlegend muted"><span><i class="lg on"></i>Training</span><span><i class="lg dl"></i>Entlastungswoche</span></div></div>
+    ${histChart(x,hs)}<div class="histlegend muted"><span><i class="lg on"></i>Training</span><span><i class="lg dl"></i>Entlastungswoche</span>${(S.sick||[]).length?'<span><i class="lg" style="background:var(--tomato-soft);border-radius:2px"></i>krank</span>':''}</div></div>
     <div class="muted" style="font-size:.82rem;margin-top:8px">Grün: oberes Ende geschafft · Orange: unter dem Ziel · „↑ mehr“: danach wurde das Gewicht erhöht</div>`;
   h+=`<div class="list histtab${x.kg?'':' nokg'}" style="margin-top:10px">`+hs.slice().reverse().map(e=>{
     const d=parseISO(e.dk); const k=e.verdict&&e.verdict.kind;
-    const badge= e.deload?'<span class="dchip" title="Entlastungswoche">Entl.</span>' : k==='up'?'<span class="dchip hup" title="danach gesteigert">↑ mehr</span>' : k==='down'?'<span class="dchip hdown" title="danach leichter">↓ leichter</span>':'';
+    const badge= e.re?'<span class="dchip" title="Erstes Training nach Krankheit">nach krank</span>' : e.deload?'<span class="dchip" title="Entlastungswoche">Entl.</span>' : k==='up'?'<span class="dchip hup" title="danach gesteigert">↑ mehr</span>' : k==='down'?'<span class="dchip hdown" title="danach leichter">↓ leichter</span>':'';
     const top=x.rmax&&e.reps.length&&!e.deload; 
     const reps=e.reps.length? e.reps.map(r=>`<span class="${top&&r>=x.rmax?'rtop':top&&x.rmin&&r<x.rmin?'rlow':''}">${r}</span>`).join(' · ') : (e.verdict?'':'erledigt');
     return `<div class="hrow"><div class="hd">${d.toLocaleDateString('de-DE',{weekday:'short'})} ${d.toLocaleDateString('de-DE',{day:'numeric',month:'numeric'})}</div>${x.kg?`<div class="hk num">${e.kg!=null?kgStr(e.kg)+' kg':'–'}</div>`:''}<div class="hr num">${reps}</div><div class="hb">${badge}</div></div>`;
@@ -1520,10 +1597,12 @@ function viewTraining(){
   const ph=T.phases[String(planWeek)];
   setHeader('Trainingsplan',`Woche ${planWeek} · ${ph.n}`);
   const base=cycleBase(planWeek);
-  let h=modeSeg()+weekSeg(planWeek,'pw')+`<div class="panel" style="margin-top:10px"><b>${esc(ph.n)} · ${esc(ph.rir)}</b><div class="muted" style="margin-top:4px">${esc(ph.note)}</div></div><div class="stack" style="margin-top:12px">`;
+  let h=modeSeg()+weekSeg(planWeek,'pw')+`<div class="panel" style="margin-top:10px"><b>${esc(ph.n)} · ${esc(ph.rir)}</b><div class="muted" style="margin-top:4px">${esc(ph.note)}</div></div>${sickPanel()}<div class="stack" style="margin-top:12px">`;
   DAYS.forEach((dn,i)=>{
     const date=addDays(base,(planWeek-1)*7+i); const dk=iso(date);
     const ss=sessionsOn(date), away=movedAway(date), skip=skippedOn(date);
+    if(isSick(dk)){ const nm=ss.length?ss.map(s=>T.workouts[s.wkey].n).join(', '):'Ruhetag';
+      h+=`<div class="day dayfit rest sickday"><div style="flex:1;min-width:0"><div class="d">${dn} <span class="muted" style="font-size:.85rem;font-family:var(--f-body)">${date.toLocaleDateString('de-DE',{day:'numeric',month:'numeric'})}</span></div><b class="muted">${esc(nm)}</b><div style="font-size:.88rem;color:var(--tomato)">krank · Training und Dehnen pausiert</div></div></div>`; return; }
     const dlabel=`<div class="d">${dn} <span class="muted" style="font-size:.85rem;font-family:var(--f-body)">${date.toLocaleDateString('de-DE',{day:'numeric',month:'numeric'})}</span></div>`;
     if(ss.length){
       ss.forEach(s=>{ const wo=T.workouts[s.wkey]; const r=fitGet(s.origin);
@@ -1537,7 +1616,7 @@ function viewTraining(){
       h+=`<div class="day dayfit rest"><button class="cardbtn" data-stretch="${dk}" style="flex:1;min-width:0">${dlabel}<b>Ruhetag</b><div class="muted" style="font-size:.88rem">${esc(T.stretch.rest.n)}, ca. ${T.stretch.rest.dur} Min.</div></button>${extra?`<div style="flex-basis:100%">${extra}</div>`:''}${r.stretch?'<span class="chip a">✓</span>':''}</div>`;
     }
   });
-  h+='</div>'+histSection();
+  h+='</div>'+statsHtml()+histSection();
   $('#view').innerHTML=h; bindModeSeg(); bindHist();
   document.querySelectorAll('[data-pw]').forEach(b=>b.onclick=()=>{planWeek=+b.dataset.pw;render();});
 }
@@ -1689,14 +1768,19 @@ function suggestKg(dk,x){
   const phase=fitPlan(parseISO(dk)).phase;
   const p=S.prog&&S.prog[x.id];
   const base = p ? p.kg : x.start;
-  return achievable(x, phase===4 ? roundStep(base*0.8, x.step||1) : base, 'down');
+  const re=reentryInfo(dk,x.id); let f= phase===4 ? 0.8 : 1; if(re) f=Math.min(f,re.f);
+  if(re && f<1){ const want=base*f, lo=achievable(x,want,'down'), hi=achievable(x,want,'up'); return (hi-want)<(want-lo) && hi<base ? hi : lo; }
+  return achievable(x, f<1 ? roundStep(base*f, x.step||1) : base, 'down');
 }
-function verdictFor(x, kg, reps, phase){
+function verdictFor(x, kg, reps, phase, re){
   // double progression: all sets at the top of the range -> heavier next time
   if(!x.rmin) return null;
   const n=reps.length; if(!n) return null;
   const top=reps.every(r=>r>=x.rmax), low=reps.filter(r=>r<x.rmin).length;
   if(phase===4) return {kind:'deload', text:'Entlastungswoche: Ergebnis zählt nicht für die Steigerung.'};
+  if(re && kg!=null){ const p=S.prog&&S.prog[x.id]; const old=p?p.kg:x.start;
+    if(top) return {kind:'up', top:true, reentry:true, next:old, text:`Wiedereinstieg geschafft. Nächstes Mal wieder ${kgStr(old)} kg.`};
+    return {kind:'deload', reentry:true, text:'Wiedereinstieg nach Krankheit: zählt nicht für die Steigerung, das Gewicht wird nicht gesenkt.'}; }
   if(kg==null){ return top?{kind:'up',text:x.id==='liegest'?'':'Alle Sätze geschafft: nächstes Mal ein stärkeres Band oder langsamer ausführen.'}:{kind:'hold',text:'Weiter so, Ziel: in allen Sätzen '+x.rmax+' Wiederholungen.'}; }
   if(top){ const next=achievable(x, kg+(x.step||1), 'up'); return {kind:'up', next, text:`Alle Sätze mit ${x.rmax}+ Wdh. geschafft. Nächstes Mal ${kgStr(next)} kg.`}; }
   if(low>=2){ const next=achievable(x, roundStep(kg*0.9, x.step||1), 'down'); return {kind:'down', next, text:`${low} Sätze unter ${x.rmin} Wdh. Nächstes Mal etwas leichter: ${kgStr(next)} kg.`}; }
@@ -1707,9 +1791,11 @@ function updateProg(dk,x){
   const phase=fitPlan(parseISO(dk)).phase; const sets=x.sets[phase-1];
   const reps=(e.reps||[]).slice(0,sets);
   if(reps.length<sets || reps.some(v=>v==null||v==='')) { e.verdict=null; return; }
-  const v=verdictFor(x, x.start!=null?(e.kg!=null?e.kg:suggestKg(dk,x)):null, reps.map(Number), phase);
+  const re=reentryInfo(dk,x.id);
+  const v=verdictFor(x, x.start!=null?(e.kg!=null?e.kg:suggestKg(dk,x)):null, reps.map(Number), phase, re);
+  if(v && reps.every(r=>x.rmax && r>=x.rmax)) v.top=true;
   e.verdict=v;
-  if(v && v.next!=null && phase!==4){ S.prog=S.prog||{}; const cur=S.prog[x.id]; if(!cur || cur.date<=dk) S.prog[x.id]={kg:v.next, date:dk}; }
+  if(v && v.next!=null && phase!==4 && !(v.reentry)){ S.prog=S.prog||{}; const cur=S.prog[x.id]; if(!cur || cur.date<=dk) S.prog[x.id]={kg:v.next, date:dk}; }
 }
 function openWorkout(dk){
   const date=parseISO(dk); const fp=fitPlan(date); if(!fp.wkey) return;
@@ -1717,6 +1803,8 @@ function openWorkout(dk){
   const dateLbl=date.toLocaleDateString('de-DE',{weekday:'long',day:'numeric',month:'long'});
   let h=sheetHead(`Training · Woche ${fp.phase} ${ph.n} · ${dateLbl}`, wo.n);
   h+=`<div class="panel" style="margin-top:10px"><b>${esc(ph.rir)}</b><div class="muted" style="margin-top:4px">${esc(ph.note)}</div></div>`;
+  { const res=wo.ex.map(x=>x.start!=null?reentryInfo(dk,x.id):null).filter(Boolean);
+    if(res.length){ const r0=res[0]; h+=`<div class="panel sickpanel" style="margin-top:10px"><b>Wiedereinstieg nach ${r0.days} Tagen krank</b><div style="font-size:.9rem;margin-top:4px">${r0.f<1?`Die Gewichte sind auf ca. ${Math.round(r0.f*100)} % gesetzt. `:''}Weniger Wiederholungen senken deine Gewichte heute nicht. Schaffst du alles, geht es nächstes Mal wieder mit dem alten Gewicht weiter.</div></div>`; } }
   h+=`<details class="howto" style="margin-top:12px"><summary><b>${esc(T.warmup.n)}</b></summary><ul>${T.warmup.items.map(i=>`<li>${esc(i)}</li>`).join('')}</ul></details>`;
   const sp=sessionPlates(dk, wo, x=>{ const e=r.ex[x.id]||{}; return e.kg!=null?e.kg:suggestKg(dk,x); });
   if(sp.setup.length) h+=`<div class="panel setup" style="margin-top:12px"><b>Zu Beginn aufbauen</b><ul>${sp.setup.map(s=>`<li>${IMPL_NAME[s.im]}${s.im==='kh'?' (die beiden gleichen)':s.im==='k1'?' (die schwerere einzelne)':''}: ${s.load.length?'pro Seite '+loadStr(s.load):'ohne Scheiben'}</li>`).join('')}</ul><div class="muted" style="font-size:.85rem">So musst du während des Trainings möglichst wenig umstecken. Bei jeder Übung steht, was sich ändert.</div></div>`;
