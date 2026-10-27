@@ -220,6 +220,8 @@ button.dchip{cursor:pointer;font-family:inherit;border:0;font-size:.75rem}
 .hrow.pp .hr{white-space:normal;font-size:.86rem;min-width:0}
 .hrow.pp .hd{font-size:.86rem}
 @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .dchip.fzc{background:#173247;color:#9fd0f2} }
+.ingst{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}
+.ingst .dchip{white-space:normal;text-align:left}
 .dchip.leftc{background:var(--amber-soft);color:var(--amber)}
 .dchip.wcur{background:var(--accent);color:var(--accent-fg);font-weight:700}
 .histchart{width:100%;height:auto;display:block;margin-top:10px}
@@ -753,7 +755,7 @@ function mealCard(m, isNow, date){
     : `<button class="cookbtn" data-cook="${esc(m[2])}" aria-pressed="${done}">${done?'✓ '+label+' · rückgängig':label+' – vom Vorrat abziehen'}</button>`;
   return `<div class="meal${isNow?' now':''}${done?' cooked':''}">
     <div class="time">${esc(m[3])}</div>
-    <div class="card"><button class="cardbtn" data-dish="${esc(m[4])}" data-por="${mpor}"><div class="kind">${esc(mealName(m[2]))}${m[7]?' <span class="swaptag">getauscht</span>':''}</div><div class="name">${esc(d.n)}</div>
+    <div class="card"><button class="cardbtn" data-dish="${esc(m[4])}" data-por="${mpor}" data-ctx="${esc((isLeftover(m)&&!fresh)?iso(addDays(date,-1))+'|Abendessen':iso(date)+'|'+m[2])}"><div class="kind">${esc(mealName(m[2]))}${m[7]?' <span class="swaptag">getauscht</span>':''}</div><div class="name">${esc(d.n)}</div>
     <div class="chips"><span class="chip">${fmt(d.kcal)} kcal</span><span class="chip p">${fmt(d.p)} g Protein</span>${fresh?`<span class="chip hint">Heute einzeln frisch kochen (1 Portion)</span>`:(m[2]==='Abendessen'&&isSplit(date)?`<span class="chip hint">Nur 1 Portion – morgen Mittag kochst du frisch</span>`:(rowHint(m,date)?`<span class="chip hint">${esc(rowHint(m,date))}</span>`:''))}${miss.length?`<span class="chip miss">Vorrat reicht nicht: ${esc(miss.map(([n,g])=>n+' (−'+fmtAmt(n,g)+')').join(', '))}</span>`:''}</div></button>
     <div class="cookrow row" style="gap:8px">${act}${canSwap(m[2],DAYS.indexOf(m[1]))?`<button class="cookbtn ghostbtn" data-swap="${m[0]}|${DAYS.indexOf(m[1])}|${esc(m[2])}">⇄ Tauschen</button>`:''}${done?'':`<button class="cookbtn ghostbtn" data-skip="${esc(m[2])}">⊘ Diese Woche auslassen</button>`}${m[2]==='Abendessen'&&m[6]===2&&!done?`<button class="cookbtn ghostbtn" data-split="${iso(date)}">${isSplit(date)?'↺ Doch doppelt kochen':'½ Nur 1 Portion – morgen Mittag frisch'}</button>`:''}${fresh&&!done?`<button class="cookbtn ghostbtn" data-split="${iso(addDays(date,-1))}">↺ Doch Reste von gestern</button>`:''}${m[8]==='thu'&&!done&&!isSplit(date)?`<button class="cookbtn ghostbtn" data-fri="${iso(addDays(date,1))}">${friHome(addDays(date,1))?'↺ Freitag doch Grillen (1 Portion)':'Freitag frei? Doppelt kochen'}</button>`:''}${m[8]==='fri'?`<button class="cookbtn ghostbtn" data-fri="${iso(date)}">↺ Freitag doch Grillen</button>`:''}</div>${m[2]==='Abendessen'&&mpor===1&&m[6]===2&&!isSplit(date)?'<div class="muted" style="font-size:.8rem;margin-top:6px">Nur 1 Portion kochen, das Mittagessen morgen ist ausgelassen.</div>':''}</div></div>`;
 }
@@ -844,7 +846,7 @@ function viewWoche(){
     const wdate=addDays(cycleBase(planWeek),(planWeek-1)*7+i); const ms=mealsFor(planWeek,dn,wdate); const t=dayTotals(ms,wdate);
     const isToday=!pos.before && pos.week===planWeek && pos.dow===i;
     h+=`<details class="day"${isToday?' open':''}><summary><span class="d">${dn}${isToday?' <span class="chip a">heute</span>':''}</span><span class="muted num">${fmt(t.kcal)} kcal · ${fmt(t.p)} g P</span></summary><div class="items">`+
-      ms.map(m=>{const d=D.dishes[m[4]]; const sk=rowSkipped(m,wdate); const por=(m[2]==='Abendessen'||m[2]==='Mittagessen')?(effPor(m,wdate)||rowPor(m)):1; const sw=canSwap(m[2],i)&&!sk; const stc=STM[iso(wdate)+'|'+m[2]]; return `<div class="wrow${sk?' skipped':''}${stc&&!sk?' st-'+stc:''}"${stc&&!sk?` title="${ST_LBL[stc]}"`:''}><button class="wmeal" data-dish="${esc(m[4])}" data-por="${por}"><span class="t">${esc(m[3])}</span><span class="n"><span class="kind eyebrow">${esc(mealName(m[2]))}${m[7]?' <span class="swaptag">getauscht</span>':''}</span><br><b>${esc(d.n)}</b>${rowHint(m,wdate)?`<br><span class="muted" style="font-size:.85rem">${esc(rowHint(m,wdate))}</span>`:''}</span><span class="k">${fmt(d.kcal)} kcal<br>${fmt(d.p)} g P</span></button>${sw?`<button class="swapbtn" data-swap="${planWeek}|${i}|${esc(m[2])}" aria-label="${esc(m[2])} am ${dn} tauschen">⇄</button>`:'<span class="swapbtn off" title="fest"></span>'}${sk==='dinner'?'<span class="swapbtn off"></span>':`<button class="swapbtn skipbtn" data-wskip="${iso(wdate)}|${esc(m[2])}" aria-pressed="${!!sk}" aria-label="${esc(m[2])} am ${dn} ${sk?'wieder essen':'diese Woche auslassen'}">${sk?'↺':'⊘'}</button>`}</div>`;}).join('')+(i===4?`<div class="wrow"><button class="linkbtn" data-fri="${iso(wdate)}" style="padding:8px 4px">${friHome(wdate)?'↺ Freitag doch Grillen (Donnerstag 1 Portion)':'＋ Freitag frei: Donnerstag doppelt kochen, Reste zu Mittag'}</button></div>`:'')+`</div></details>`;
+      ms.map(m=>{const d=D.dishes[m[4]]; const sk=rowSkipped(m,wdate); const por=(m[2]==='Abendessen'||m[2]==='Mittagessen')?(effPor(m,wdate)||rowPor(m)):1; const sw=canSwap(m[2],i)&&!sk; const stc=STM[iso(wdate)+'|'+m[2]]; return `<div class="wrow${sk?' skipped':''}${stc&&!sk?' st-'+stc:''}"${stc&&!sk?` title="${ST_LBL[stc]}"`:''}><button class="wmeal" data-dish="${esc(m[4])}" data-por="${por}" data-ctx="${esc((lunchFromDinner(m)&&!lunchFresh(m,wdate))?iso(addDays(wdate,-1))+'|Abendessen':iso(wdate)+'|'+m[2])}"><span class="t">${esc(m[3])}</span><span class="n"><span class="kind eyebrow">${esc(mealName(m[2]))}${m[7]?' <span class="swaptag">getauscht</span>':''}</span><br><b>${esc(d.n)}</b>${rowHint(m,wdate)?`<br><span class="muted" style="font-size:.85rem">${esc(rowHint(m,wdate))}</span>`:''}</span><span class="k">${fmt(d.kcal)} kcal<br>${fmt(d.p)} g P</span></button>${sw?`<button class="swapbtn" data-swap="${planWeek}|${i}|${esc(m[2])}" aria-label="${esc(m[2])} am ${dn} tauschen">⇄</button>`:'<span class="swapbtn off" title="fest"></span>'}${sk==='dinner'?'<span class="swapbtn off"></span>':`<button class="swapbtn skipbtn" data-wskip="${iso(wdate)}|${esc(m[2])}" aria-pressed="${!!sk}" aria-label="${esc(m[2])} am ${dn} ${sk?'wieder essen':'diese Woche auslassen'}">${sk?'↺':'⊘'}</button>`}</div>`;}).join('')+(i===4?`<div class="wrow"><button class="linkbtn" data-fri="${iso(wdate)}" style="padding:8px 4px">${friHome(wdate)?'↺ Freitag doch Grillen (Donnerstag 1 Portion)':'＋ Freitag frei: Donnerstag doppelt kochen, Reste zu Mittag'}</button></div>`:'')+`</div></details>`;
   });
   h+='</div>';
   h+=`<p class="muted" style="font-size:.85rem;margin-top:12px">Mit ⊘ lässt du ein Gericht nur in dieser Woche aus, seine Zutaten verschwinden dann aus der Einkaufsliste. Mit ⇄ tauschst du ein Gericht mit einem anderen Tag derselben Woche: Frühstück gegen Frühstück, Snack gegen Snack. Ein Abendessen nimmt sein Mittagessen am nächsten Tag mit, beim Sonntag das Montags-Mittagessen der nächsten Woche.</p>`;
@@ -1204,8 +1206,23 @@ function stepsHtml(z){
       (steps.length?`<ol class="steps">${steps.map(s=>`<li>${esc(s.replace(/^\d\)\s*/,''))}</li>`).join('')}</ol>`:'');
   }).join('');
 }
-function openDish(id, porArg){
-  const d=D.dishes[id]; if(!d) return;
+function ingStatus(n,need,ctx){
+  const nu=D.nut[n]; if(!nu || nu[0]==='Gewürze & Basics') return '';
+  const ki=keepInfo(n); const parts=[]; const dk=ctx?ctx.split('|')[0]:null;
+  const fz=frozenOf(n); const mine=ctx?fz.find(p=>p.key===ctx):null; const o=S.opened&&S.opened[n];
+  if(mine){ const direct=ki&&/gefroren (direkt|verwenden|in die Pfanne|garen|reiben|toasten)/.test(ki.tip);
+    parts.push(`<button class="dchip fzc" data-ingfz="${esc(n)}">❄ ${fmtG(mine.g)} g eingefroren · ${direct?'gefroren verwenden':'am Vortag in den Kühlschrank'}</button>`); }
+  else if(o){ const until=iso(addDays(parseISO(o.date),(ki||{fridge:3}).fridge)); const late=dk && until<dk;
+    parts.push(`<button class="dchip ${late?'miss':'opc'}" data-ingopen="${esc(n)}">offen im Kühlschrank · ${fmtG(g2(o.left))} g · hält bis ${esc(fmtD(until))}${late?' – nicht bis dahin':''}</button>`); }
+  else if(stockHas(n) && S.stock[n]>0.5){
+    parts.push(`<span class="dchip">im Vorrat ${esc(fmtAmt(n,S.stock[n]))}</span>`);
+    if(ki) parts.push(`<button class="dchip opbtn" data-ingopen="${esc(n)}">Packung öffnen</button>`); }
+  else if(stockHas(n)) parts.push(`<span class="dchip miss">nicht im Vorrat</span>`);
+  if(!mine && fz.length) parts.push(`<button class="dchip fzc" data-ingfz="${esc(n)}">❄ ${fmtG(g2(frozenSum(n)))} g im Gefrierfach</button>`);
+  return parts.length?`<div class="ingst">${parts.join('')}</div>`:'';
+}
+function openDish(id, porArg, ctx){
+  const d=D.dishes[id]; if(!d) return; sheetBack=()=>openDish(id, porArg, ctx);
   const por=(+porArg)||d.por||1;
   const meta=[`${fmt(d.kcal)} kcal`,`${fmt(d.p)} g Protein`,`${fmt(d.f)} g Fett`,`${fmt(d.kh)} g KH`];
   let times=`<span class="chip">Gesamt ca. ${d.t} Min.</span>`;
@@ -1217,15 +1234,20 @@ function openDish(id, porArg){
     ${d.boost?`<div class="panel prep" style="margin-top:10px;font-size:.9rem">An dein Kalorienziel (${fmt(kcalTarget())} kcal) angepasst: ${esc(d.boost.map(([n,g])=>'+'+fmtG(g)+' g '+n).join(', '))} pro Portion.</div>`:''}
     <h3 class="eyebrow" style="margin:18px 0 6px">Zutaten</h3>
     <table class="ing"><thead><tr><th>Zutat</th><th>pro Portion</th>${por>1?`<th>kochen (${por} Port.)</th>`:''}</tr></thead><tbody>
-    ${d.ing.map(([n,g])=>{ const sp=spoon(n,g*por); return `<tr><td>${esc(n)}${sp&&por===1?` <span class="muted" style="font-size:.8rem">(${sp})</span>`:''}</td><td class="g">${fmtG(g)} g</td>${por>1?`<td class="g"><b>${fmtG(g*por)} g</b>${sp?`<br><span class="muted" style="font-size:.78rem;font-weight:400">${sp}</span>`:''}</td>`:''}</tr>`; }).join('')}</tbody></table>
+    ${d.ing.map(([n,g])=>{ const sp=spoon(n,g*por); return `<tr><td>${esc(n)}${sp&&por===1?` <span class="muted" style="font-size:.8rem">(${sp})</span>`:''}${ingStatus(n,g*por,ctx)}</td><td class="g">${fmtG(g)} g</td>${por>1?`<td class="g"><b>${fmtG(g*por)} g</b>${sp?`<br><span class="muted" style="font-size:.78rem;font-weight:400">${sp}</span>`:''}</td>`:''}</tr>`; }).join('')}</tbody></table>
     <h3 class="eyebrow" style="margin:18px 0 0">Zubereitung</h3>${stepsHtml(d.z)}
     <p class="muted" style="font-size:.85rem;margin-top:14px">Gewürze, Kräuter, Essig und Brühe nach Bedarf. Fleisch, Fisch und Gemüse roh gewogen, Nudeln, Reis und Linsen trocken.</p>`;
   $('#sheet').hidden=false; $('#closeSheet').onclick=closeSheet; $('#closeSheet').focus();
+  $('#sheetInner').querySelectorAll('[data-ingopen]').forEach(b=>b.onclick=()=>openOpened(b.dataset.ingopen));
+  $('#sheetInner').querySelectorAll('[data-ingfz]').forEach(b=>b.onclick=()=>openFrozen(b.dataset.ingfz));
 }
-function closeSheet(){ $('#sheet').hidden=true; }
+function closeSheet(){ $('#sheet').hidden=true; sheetBack=null; }
+let sheetBack=null;
+function backBtn(){ return sheetBack?`<div class="row" style="margin-top:14px"><button class="btn ghost" id="sheetBackBtn">← Zurück zum Rezept</button></div>`:''; }
+function bindBack(){ const b=$('#sheetBackBtn'); if(b) b.onclick=()=>{ const f=sheetBack; f&&f(); }; }
 $('#sheet').addEventListener('click',e=>{ if(e.target.id==='sheet') closeSheet(); });
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeSheet(); });
-$('#view').addEventListener('click',e=>{ const sw=e.target.closest('[data-swap]'); if(sw){ e.preventDefault(); const [w,di,meal]=sw.dataset.swap.split('|'); openSwap(+w,+di,meal); return; } const b=e.target.closest('[data-dish]'); if(b){ e.preventDefault(); openDish(b.dataset.dish, b.dataset.por); } });
+$('#view').addEventListener('click',e=>{ const sw=e.target.closest('[data-swap]'); if(sw){ e.preventDefault(); const [w,di,meal]=sw.dataset.swap.split('|'); openSwap(+w,+di,meal); return; } const b=e.target.closest('[data-dish]'); if(b){ e.preventDefault(); openDish(b.dataset.dish, b.dataset.por, b.dataset.ctx); } });
 
 /* ---------- routing ---------- */
 function keepScroll(fn){ const y=window.scrollY; fn(); window.scrollTo(0,y); }
@@ -1374,8 +1396,8 @@ function openOpened(name){
     h+=`<p class="muted" style="margin-top:6px">Die App plant dann, was davon in den Kühlschrank kommt und was du für welchen Tag einfrierst.</p>
       <div class="gearrow"><div class="field"><label for="opDate">Geöffnet am</label><input type="date" id="opDate" value="${esc(iso(new Date()))}"></div>
       <div class="field"><label for="opLeft">Noch in der offenen Packung (g)</label><input type="number" inputmode="decimal" id="opLeft" min="0" value="${def}"></div></div>
-      <div class="row" style="margin-top:12px"><button class="btn" id="opSave">Portionsplan anzeigen</button></div>`;
-    sheetOpen(h);
+      <div class="row" style="margin-top:12px"><button class="btn" id="opSave">Portionsplan anzeigen</button></div>`+backBtn();
+    sheetOpen(h); bindBack();
     $('#opSave').onclick=()=>{ const v=parseFloat($('#opLeft').value.replace(',','.')); if(isNaN(v)||v<=0) return; S.opened=S.opened||{}; S.opened[name]={date:$('#opDate').value||iso(new Date()), left:v}; persist(); openOpened(name); render(); };
     return;
   }
@@ -1396,6 +1418,7 @@ function openOpened(name){
     toFreeze.forEach(r=>list.push({g:r.g, key:r.key, date:r.date, dish:r.dish, frozen:today})); if(pl.rest>0.5&&pl.ki.fz) list.push({g:pl.rest, key:null, date:null, dish:'Reserve', frozen:today});
     o.left=Math.max(0,o.left-toFreeze.reduce((s,r)=>s+r.g,0)-(pl.rest>0.5&&pl.ki.fz?pl.rest:0)); if(o.left<0.5) delete S.opened[name]; persist(); render(); openFrozenOrOpened(name); };
   $('#opDone').onclick=()=>{ delete S.opened[name]; persist(); closeSheet(); render(); };
+  if(sheetBack){ $('#sheetInner').insertAdjacentHTML('beforeend',backBtn()); bindBack(); }
   bindFrozen(name);
 }
 function openFrozenOrOpened(name){ if(S.opened&&S.opened[name]) openOpened(name); else openFrozen(name); }
@@ -1404,7 +1427,7 @@ function openFrozen(name){
   const ki=keepInfo(name); if(ki&&ki.tip) h+=`<div class="panel prep" style="margin-top:10px;font-size:.9rem">${esc(ki.tip)}</div>`;
   h+= fz.length? `<div class="list histtab" style="margin-top:10px">${fz.map((p,i)=>`<div class="hrow pp"><div class="hd">${p.date?esc(fmtD(p.date)):'Reserve'}</div><div class="hk num">${fmtG(p.g)} g</div><div class="hr">${esc(p.dish||'')}${p.date&&p.date<iso(new Date())?' <span class="muted">· Termin vorbei</span>':''}</div><div class="hb"><button class="linkbtn" data-fzdel="${i}">entnommen</button></div></div>`).join('')}</div>
     <div class="row" style="margin-top:8px"><button class="btn ghost" id="fzReassign">Portionen neu zuordnen</button><button class="btn ghost" id="fzOpen">Neue Packung angebrochen</button></div>` : `<div class="muted" style="margin-top:10px">Nichts eingefroren.</div><div class="row" style="margin-top:8px"><button class="btn" id="fzOpen">Packung angebrochen</button></div>`;
-  sheetOpen(h); bindFrozen(name);
+  h+=backBtn(); sheetOpen(h); bindFrozen(name); bindBack();
   const op=$('#fzOpen'); if(op) op.onclick=()=>{ if(S.opened) delete S.opened[name]; openOpened(name); };
 }
 function bindFrozen(name){
@@ -1477,8 +1500,8 @@ function viewVorrat(){
   $('#onlyHave').onclick=()=>{stockOnlyHave=!stockOnlyHave;render();};
   const si=$('#stockSearch'); si.oninput=()=>{ stockFilter=si.value; const pos=si.selectionStart; render(); const n=$('#stockSearch'); n.focus(); try{n.setSelectionRange(pos,pos);}catch(e){} };
   document.querySelectorAll('[data-stock]').forEach(inp=>inp.onchange=()=>{ const n=inp.dataset.stock; const v=inp.value.trim().replace(',','.'); S.stock=S.stock||{}; if(v==='') delete S.stock[n]; else { const x=parseFloat(v); if(!isNaN(x)&&x>=0) S.stock[n]= unitOf(n)==='pc' ? x*pcWeight(n) : x; } persist(); keepScroll(render); });
-  document.querySelectorAll('[data-opened]').forEach(b=>b.onclick=()=>openOpened(b.dataset.opened));
-  document.querySelectorAll('[data-frozen]').forEach(b=>b.onclick=()=>openFrozen(b.dataset.frozen));
+  document.querySelectorAll('[data-opened]').forEach(b=>b.onclick=()=>{ sheetBack=null; openOpened(b.dataset.opened); });
+  document.querySelectorAll('[data-frozen]').forEach(b=>b.onclick=()=>{ sheetBack=null; openFrozen(b.dataset.frozen); });
   document.querySelectorAll('[data-unit]').forEach(b=>b.onclick=()=>{ S.stockUnit=S.stockUnit||{}; S.stockUnit[b.dataset.unit]=b.dataset.u; persist(); keepScroll(render); });
   const sc=$('#stockClear'); if(sc) sc.onclick=()=>{stockConfirm=true;keepScroll(render);};
   const sy=$('#stockClearYes'); if(sy) sy.onclick=()=>{S.stock={};S.bought={};stockConfirm=false;persist();render();};
