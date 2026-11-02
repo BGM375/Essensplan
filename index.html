@@ -916,6 +916,8 @@ function futureNeed(w,name){
   const IDX={'So davor':-1,'Mo':0,'Di':1,'Mi':2,'Do':3,'Fr':4,'Sa':5,'So':6};
   return ((D.need[w]&&D.need[w][name])||[]).reduce((s,[l,g])=>s+(addDays(M,IDX[l])>=today?g:0),0);
 }
+// only fresh things can really have been forgotten – spices, oil, dry goods and tins are usually at home anyway
+function isFreshCat(n){ const nu=D.nut[n]; return !!nu && (['Obst & Gemüse','Milchprodukte & Eier','Fleisch & Fisch','Kühlregal vegetarisch','Brot & Backwaren'].includes(nu[0]) || FRESH_HERBS.has(n)); }
 function nextTripItems(T){
   const ORD={r1:0,r2:1,r3:2}; const all=tripItems(T.w);
   let main=all.filter(it=>it.trip===T.r);
@@ -926,7 +928,7 @@ function nextTripItems(T){
     m.forEach(n=>{ if(n.extra) return; n.amt=amtStr(n.name,n.g)+(n.gB>0.05&&n.gB<n.g-0.05?` · davon ${fmtG(g2(n.gB))}\u00a0g für Di–Do`:''); });
     main=m; }
   const carry=[]; const byName={};
-  all.filter(it=>ORD[it.trip]<ORD[T.r] && !it.extra && !stockHas(it.name) && !isDone(T.w,it) && !isHome(T.w,it) && stillNeeded(T.w,it.name)).forEach(it=>{
+  all.filter(it=>ORD[it.trip]<ORD[T.r] && !it.extra && isFreshCat(it.name) && !stockHas(it.name) && !isDone(T.w,it) && !isHome(T.w,it) && stillNeeded(T.w,it.name)).forEach(it=>{
     const c=byName[it.name];
     if(c){ c.also.push(it.key); c.g=g2(c.g+it.g); c.amt=amtStr(it.name,c.g); }
     else { const n=Object.assign({},it,{carry:true,also:[]}); n.amt=amtStr(it.name,it.g); byName[it.name]=n; carry.push(n); }
@@ -1091,6 +1093,7 @@ function viewEinkauf(){
     let list=g.items.slice().sort((a,b)=>(catRank(a.cat)-catRank(b.cat))||a.name.localeCompare(b.name,'de'));
     if(hideDone) list=list.filter(it=>!isClosed(w,it));
     h+=`<section class="group${g.carryGrp?' carrygrp':''}"><h3><span>${esc(g.title)}</span><span class="muted num" style="font-family:var(--f-body);font-size:.85rem">${open} offen</span></h3>`;
+    if(g.carryGrp && g.items.some(it=>!it.short && !isClosed(w,it))) h+=`<div class="row" style="margin:-2px 0 8px;gap:8px;align-items:center"><span class="muted" style="font-size:.85rem;flex:1">Hast du das schon? Dann einfach wegklicken:</span><button class="cookbtn ghostbtn" id="carryAllHome">Alles schon da</button></div>`;
     if(!list.length){ h+=`<div class="list"><div class="empty">Alles erledigt.</div></div></section>`; return; }
     if(g.bySeg){
       const segs=[['A','Bis Di-Nachmittag'],['B','Für Di-Abend bis Do (nächster '+esc(sundayStore())+'-Einkauf erst Do)']];
@@ -1121,6 +1124,7 @@ function viewEinkauf(){
   const aa=$('#autoArr'); if(aa) aa.onclick=()=>{ const r=autoArrange(w); persist(); autoMsg=r.swaps?`${r.swaps} Tausch${r.swaps>1?'e':''} in Woche ${w}: vorher ${r.before}, jetzt ${r.after} Artikel woanders.`:`Keine bessere Anordnung gefunden (${r.after} Artikel woanders). Ordne diese Zutaten ggf. ${sundayStore()} zu.`; keepScroll(render); };
   const aal=$('#autoArrAll'); if(aal) aal.onclick=()=>{ const parts=[1,2,3,4].map(x=>{ const r=autoArrange(x); return `W${x}: ${r.before}→${r.after}`; }); persist(); autoMsg='Artikel woanders vorher→nachher: '+parts.join(' · '); keepScroll(render); };
   const sb=$('#shopBk'); if(sb) sb.onchange=e=>importFromInput(e.target,'shopBkMsg');
+  const cah=$('#carryAllHome'); if(cah) cah.onclick=()=>{ S.home=S.home||{}; S.home[w]=S.home[w]||{}; items.filter(it=>it.carry&&!it.short).forEach(it=>[it.key].concat(it.also||[]).forEach(k=>S.home[w][k]=true)); persist(); keepScroll(render); };
   document.querySelectorAll('[data-buy]').forEach(inp=>inp.onchange=()=>{ const k=inp.dataset.buy; const it=items.find(x=>x.key===k); const b=S.bought&&S.bought[w]&&S.bought[w][k]; if(!it) return;
     let v=parseFloat(inp.value.replace(',','.')); if(isNaN(v)||v<0) return; if(unitOf(it.name)==='pc') v=v*pcWeight(it.name);
     if(!b){ S.buyAmt=S.buyAmt||{}; S.buyAmt[w]=S.buyAmt[w]||{}; S.buyAmt[w][k]=v; persist(); return; }
@@ -1357,12 +1361,21 @@ function isLeftover(m){ return m[2]==='Mittagessen' && /aufwärmen/.test(m[5]||'
 function isExternal(m){ return /_D_GRILL$/.test(m[4]); }
 function dishNeed(id,por){ const d=D.dishes[id]; por=por||d.por||1; return d.ing.map(([n,g])=>[n,g*por]); }
 function missingFor(id,por){ return dishNeed(id,por).filter(([n,g])=>stockHas(n) && S.stock[n] < g - 0.5).map(([n,g])=>[n, g-S.stock[n]]); }
+/* cooked = the ingredients were there: shopping parts of earlier trips that were never ticked count as "zu Hause" */
+function autoHomeFromCooking(date,m){
+  const w=m[0]; const d=D.dishes[m[4]]; if(!d) return [];
+  const mon=addDays(date,-((date.getDay()+6)%7)); const tripDay={so:-2,sb:-2,r2:1,r2b:1,r3:3};
+  const set=[]; S.home=S.home||{}; S.home[w]=S.home[w]||{}; const c=(S.checks&&S.checks[w])||{};
+  d.ing.forEach(([n])=>{ tripParts(w,n).forEach(p=>{ const pre=p.key.split(':')[0]; const td=addDays(mon,tripDay[pre]); if(td>date) return;
+    if(c[p.key] || S.home[w][p.key]) return; S.home[w][p.key]='auto'; set.push([w,p.key]); }); });
+  return set;
+}
 function toggleCooked(date,m){
   S.cooked=S.cooked||{}; S.stock=S.stock||{};
   const k=cookKey(date,m[2]); const wasCooked=!!S.cooked[k];
-  if(S.cooked[k]){ const used=S.cooked[k].used||{}; Object.keys(used).forEach(n=>{ S.stock[n]=(S.stock[n]||0)+used[n]; }); delete S.cooked[k]; }
+  if(S.cooked[k]){ (S.cooked[k].autoHome||[]).forEach(([w,key])=>{ if(S.home&&S.home[w]&&S.home[w][key]==='auto') delete S.home[w][key]; }); const used=S.cooked[k].used||{}; Object.keys(used).forEach(n=>{ S.stock[n]=(S.stock[n]||0)+used[n]; }); delete S.cooked[k]; }
   else { const used={}; dishNeed(m[4], (m[2]==='Abendessen'||m[2]==='Mittagessen')?(effPor(m,date)||rowPor(m)):1).forEach(([n,g])=>{ if(!stockHas(n)) return; const before=S.stock[n]; const after=Math.max(0,before-g); used[n]=(used[n]||0)+(before-after); S.stock[n]=after; }); S.cooked[k]={id:m[4],used}; }
-  if(!wasCooked && S.cooked[k]) consumeOpened(date,m,S.cooked[k].used);
+  if(!wasCooked && S.cooked[k]){ consumeOpened(date,m,S.cooked[k].used); S.cooked[k].autoHome=autoHomeFromCooking(date,m); }
   persist();
 }
 function addPurchase(w,it){
